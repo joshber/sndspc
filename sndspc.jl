@@ -5,16 +5,18 @@ Josh Berson, josh@joshberson.net
 May 2017
 
 What:
-* Extract spectral envelope features from short segments of an audio recording,
-* Embed feature space in a lower-dim space suitable for visualization and learning
+- Extract spectral envelope features from short segments of an audio recording
+- Embed feature space in a lower-dim space suitable for visualization and learning
 
 Why:
-* Explore ways of heuristically representing phenomenologically significant
-  features of sound and observing how they change over the course of a recording
+- Explore ways of heuristically representing phenomenologically significant
+  features of sound and observing how they change over time
 
 Inspiration:
-* http://www.seaandsailor.com/audiosp_julia.html
-* Dupont and Ravet, Improved audio classification using a novel non-linear
+- https://lust.nl/#projects-7158
+- journals.plos.org/plosone/article?id=10.1371/journal.pone.0164783
+- http://www.seaandsailor.com/audiosp_julia.html
+- Dupont and Ravet, Improved audio classification using a novel non-linear
   dimensionality reduction ensemble approach (2013)
 =#
 
@@ -28,6 +30,7 @@ Inspiration:
 
 
 using StatsBase
+using MultivariateStats
 using SampledSignals
 using LibSndFile
 using DSP
@@ -161,3 +164,6 @@ end
 
 S = extractSamples(sourcePath)
 X = extractFeatures.(S)
+
+# Check that size(S) is correct given length of source and step
+# Check that size(X) = (size(S), 200)
