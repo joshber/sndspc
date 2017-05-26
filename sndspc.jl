@@ -35,6 +35,7 @@ using MFCC
 
 sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
 
+
 function extractSamples( path, step = 1.5, n = 2 )
   #=
   Stream an audio file, create an array of samples, step * n seconds/sample
