@@ -13,8 +13,8 @@ Why:
   features of sound and observing how they change over time
 
 Inspiration:
+- http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0164783
 - https://lust.nl/#projects-7158
-- journals.plos.org/plosone/article?id=10.1371/journal.pone.0164783
 - http://www.seaandsailor.com/audiosp_julia.html
 - Dupont and Ravet, Improved audio classification using a novel non-linear
   dimensionality reduction ensemble approach (2013)
@@ -26,15 +26,20 @@ Inspiration:
 # Optional: Reduce with ICA -- 10 dof? ... and t-SNE?
 # Graph
 # Cluster with k-means and EM
-# Classify with SVM -- what's the target dimension?
+# Classify with SVM or TensorFlow -- what's the target dimension?
 
 
 using StatsBase
 using MultivariateStats
+
 using SampledSignals
 using LibSndFile
 using DSP
 using MFCC
+
+using GLVisualize # FIXME plus Plotly for Plots backend? Or is GLV ready?
+using Plots # FIXME and StatPlots, PlotRecipes?
+
 
 sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
 
@@ -104,7 +109,7 @@ function extractFeatures( sample )
   # size(cols) = 39
   cols = [ view(mfc,:,c) for c in 1:size(mfc,2) ]
 
-  mfmean = mean.(cols) # sum.(cols) ./ size(mfc,1)
+  mfmean = mean.(cols)
     # Without the ., mean() would pull elements from across the columns,
     # yielding rowwise means
 
@@ -163,7 +168,20 @@ function extractFeatures( sample )
 end
 
 S = extractSamples(sourcePath)
-X = extractFeatures.(S)
+X, Xdict = extractFeatures.(S)
 
 # Check that size(S) is correct given length of source and step
 # Check that size(X) = (size(S), 200)
+# Apply ICA
+
+# FIXME: Do we need to use X'? Seems like it
+# https://multivariatestatsjl.readthedocs.io/en/latest/
+# PCA, PPCA: Let (d, n) = size(X) be respectively the input dimension and the number of observations.
+# ICA: X – The data matrix, of size (m, n). Each row corresponds to a mixed signal,
+# while each column corresponds to an observation (e.g all signal value at a particular time step).
+
+# fit(ICA, X', 10)
+# fit(PPCA, X'; maxoutdim=10)
+# fit(PCA, X'; maxoutdim=10)
+
+# FIXME experiment with TensorFlow
