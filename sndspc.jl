@@ -7,6 +7,7 @@ May 2017
 What:
 - Extract spectral envelope features from short segments of an audio recording
 - Embed feature space in a lower-dim space suitable for visualization and learning
+- Use TensorFlow to classify sounds? Need labeling
 
 Why:
 - Explore ways of heuristically representing phenomenologically significant
@@ -20,25 +21,19 @@ Inspiration:
   dimensionality reduction ensemble approach (2013)
 =#
 
-# Load in a recording
-# Split it into samples
-# Get MFCCs and SFs
-# Optional: Reduce with ICA -- 10 dof? ... and t-SNE?
-# Graph
-# Cluster with k-means and EM
-# Classify with SVM or TensorFlow -- what's the target dimension?
+using StatsBase # variance, skew, kurtosis, etc
+using MultivariateStats # ICA
+#using Learn # ObjectiveFunction req Julia ≥ 0.6
+#using TensorFlow # as above
 
-
-using StatsBase
-using MultivariateStats
+#using GLVisualize # as above
+#using GR # as above
+using Plots
 
 using SampledSignals
 using LibSndFile
 using DSP
 using MFCC
-
-using GLVisualize # FIXME plus Plotly for Plots backend? Or is GLV ready?
-using Plots # FIXME and StatPlots, PlotRecipes?
 
 
 sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
@@ -47,7 +42,7 @@ sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
 function extractSamples( path, step = 1.5, n = 2 )
   #=
   Stream an audio file, create an array of samples, step * n seconds/sample
-  Returns samples, exception if any
+  Returns (samples, exception or 0)
   =#
 
   samples = []
@@ -56,15 +51,16 @@ function extractSamples( path, step = 1.5, n = 2 )
     source = loadstream(path)
     sr = samplerate(source)
 
-    step = floor(step * sr) # Switch from seconds to frames
+    step = Int64((step * sr)) # Switch from seconds to frames
     n = max(1, floor(n)) # Whole # steps/sample
 
     # Extract overlapping samples from the source
     # Overlap is (n - 1)/n steps, i.e., consume one new step/sample
     samp = []
     append!(samp, read(source, (n - 1) * step))
-    while !eof(source)
+    for i in 2 : nframes(source) / step
       append!(samp, read(source, step))
+      #@show samp
       push!(samples, samp)
       samp = samp[step + 1 : end]
         # Non-destructively left-shift samp by one step of frames
@@ -167,21 +163,21 @@ function extractFeatures( sample )
   )
 end
 
-S = extractSamples(sourcePath)
-X, Xdict = extractFeatures.(S)
+S, exc = extractSamples(sourcePath)
+@show size(S)
+@show exc
 
-# Check that size(S) is correct given length of source and step
-# Check that size(X) = (size(S), 200)
-# Apply ICA
+#X, Xdict = extractFeatures.(S)
+#@show size(X)
 
-# FIXME: Do we need to use X'? Seems like it
-# https://multivariatestatsjl.readthedocs.io/en/latest/
-# PCA, PPCA: Let (d, n) = size(X) be respectively the input dimension and the number of observations.
-# ICA: X – The data matrix, of size (m, n). Each row corresponds to a mixed signal,
-# while each column corresponds to an observation (e.g all signal value at a particular time step).
+# https://multivariatestatsjl.readthedocs.io/en/latest/ica.html
+# “X – The data matrix, of size (m, n). Each row corresponds to a mixed signal,
+#  while each column corresponds to an observation (e.g all signal value at a
+#  particular time step).”
 
-# fit(ICA, X', 10)
-# fit(PPCA, X'; maxoutdim=10)
-# fit(PCA, X'; maxoutdim=10)
+#ica = fit(ICA, X', 10) # FIXME: X' or X?
 
-# FIXME experiment with TensorFlow
+#@show size(ica.W)
+
+# NOTES
+# Huber penalty to regress with outliers/noisy samples?
