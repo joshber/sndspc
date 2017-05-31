@@ -23,9 +23,6 @@ using WAV, DSP, MFCC
 using Plots
 
 
-#sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
-sourcePath = "/Users/josh/Sync/Recordings/Inshriach/Inshriach.WAV"
-
 function extractSamples( path, len = 3, step = len/2 )
   #=
   Read an audio file, construct an array of samples
@@ -94,10 +91,8 @@ function extractFeatures( sample, fs )
 
   # Log-bin the power spectrum down to 20Hz
   fbands = size(pow,1)
-  binshifts = [ i for i in 1:12 if Int64(fs) >> i >= 20 && fbands >> i >= 1 ]
+  binshifts = [ i for i in 1:12 if Int64(fs) >> i ≥ 20 && fbands >> i ≥ 1 ]
   nbins = length(binshifts)
-  @show fbands
-  @show nbins
   bins = Array{Array{Float64, 2}}(nbins)
   for i in 1:nbins
     bins[i] = pow[ fbands >> binshifts[i] + 1 : fbands >> (binshifts[i] - 1), 1:end ]
@@ -125,32 +120,48 @@ function extractFeatures( sample, fs )
 
   # Return a feature vector
   # With 13 MFCCs and 11 log bins, that's 200 features
-  [ mfµ; mfσ2; mfγ; mfkur; sfµ; sfσ2; sfγ; sfkur ]#=,
-  Dict(
-    "MFCCmean" => mfµ,
-    "MFCCvariance" => mfσ2,
-    "MFCCskewness" => mfγ,
-    "MFCCkurtosis" => mfkur,
-    "SFmean" => sfµ,
-    "SFvariance" => sfσ2,
-    "SFskewness" => sfγ,
-    "SFkurtosis" => sfkur
-  )=#
+  [ mfµ; mfσ2; mfγ; mfkur; sfµ; sfσ2; sfγ; sfkur ]
 end
 
-samples, fs = extractSamples(sourcePath)
+function constructFeatureSpace( samples, fs )
+  #=
+  Dot notation would yield a vector of vectors
+  What we need is a two-dimensional array
+  =#
 
-X = extractFeatures.(samples, fs)
-@show size(X)
+  # TODO: Adjust # features according to fs
+  # 144 MFCC features + 4n where n = 11 for fs of 44.1KHz or higher
+  # but less for fs of 16 or 8KHz
 
-# https://multivariatestatsjl.readthedocs.io/en/latest/ica.html
-# “X – The data matrix, of size (m, n). Each row corresponds to a mixed signal,
-#  while each column corresponds to an observation (e.g all signal value at a
-#  particular time step).”
+  X = Array{Float64, 2}(length(samples), 200)
+  for i in 1:length(samples)
+    X[i, 1:end] = extractFeatures(samples[i], fs)[1:end]
+  end
+  X
+end
 
-#ica = fit(ICA, X, 10) # FIXME: X or X'?
+function main()
+  sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
+  
+  X = constructFeatureSpace(extractSamples(sourcePath)...)
+  ica = fit(ICA, X, 10)
+  # now plot ...
+end
 
-#@show size(ica.W)
+main()
+
+# FIXME: Is ICA appropriate here? Kernel PCA?
+# ICA does not seem really appropriate, since the different dimensions of the feature space
+# here do not correspond to independent series of observations along the lines of
+# sources in a cocktail party problem or regions of an image
+# Maybe FIRST apply PCA/svd to reduce dimensionality, THEN apply ICA?
+# * PCA to reduce dimensionality
+# * ICA to maximize statistical independence / joint entropy among basis vectors
+# https://stats.stackexchange.com/questions/97704/does-ica-require-to-run-pca-first
+# * How do you decide optimal number of ICs?
+# https://stats.stackexchange.com/questions/94463/what-are-the-advantages-of-kernel-pca-over-standard-pca
+
+# Kernel PCA -- nonlinear dim reduction
 
 # NOTES
 # Huber penalty to regress with outliers/noisy samples?
