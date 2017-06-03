@@ -141,9 +141,9 @@ function constructFeatureSpace( samples, fs )
   What we need is a two-dimensional array
   =#
   sfmin, sfmax = 200, 12000
-  # 144 MFCC features + 4n for spectral flatness
+  # 156 MFCC features + 4n for spectral flatness
   # where n is # log bins with lower bound in [sfmin,sfmax]Hz
-  nfeatures = 144 + 4 * length(logbins(fs, sfmin, sfmax))
+  nfeatures = 156 + 4 * length(logbins(fs, sfmin, sfmax))
   X = Array{Float64, 2}(length(samples), nfeatures)
   for i in 1:length(samples)
     X[i, 1:end] = extractFeatures(samples[i], fs, sfmin, sfmax)[1:end]
@@ -152,14 +152,13 @@ function constructFeatureSpace( samples, fs )
 end
 
 function main()
-  sourcePath = "/Users/josh/Sync/Recordings/LaosFebMar2016/lp.wav"
+  sourcePath = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/lp.wav"
 
   # TODO: Need higher resolution in the time domain, say step=.1s
   # But that froze my MBA
   X = constructFeatureSpace(extractSamples(sourcePath, 3, 1)...)
-  pca = fit(PCA, X, 10)
-  @show principalratio(pca)
-    # TODO: Select PCA dim to capture 95 percent of covariance
+  pca = fit(PCA, X; pratio=.95, method=:svd)
+  @show pca
 
   # TODO: KPCA with Gaussian kernel to capture nonlinearities in the feature space
   # TODO: Plot — 3D animation of PCs against time, with PC value on vertical
