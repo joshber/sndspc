@@ -1,41 +1,51 @@
-function kPCA( X; varratio=.99 )
+function embed( X; varratio=.99 )
   #=
   X is (n, d): n samples, d dimensions
-  https://arxiv.org/abs/1404.1100
-  https://stats.stackexchange.com/questions/134282/relationship-between-svd-and-pca-how-to-use-svd-to-perform-pca
 
-  Returns a projection of X onto the first k principal directions,
-  where those k directions account for varratio of the total variance
+  Returns:
+  * A projection of normalized X onto the first k principal directions,
+    where those k directions account for varratio of the total variance
+  * The first k principal directions as a matrix, with PDs in columns
+
+  Principal component analysis is one of those things that makes less sense
+  the more you think about it. Samples in rows or in columns, decompose the
+  sample matrix or the covariance matrix, choice of decomposition (eig vs svd),
+  efficiency and numerical stability of different strategies. I've found these
+  helpful:
+
+  https://stats.stackexchange.com/questions/134282/relationship-between-svd-and-pca-how-to-use-svd-to-perform-pca
+  https://arxiv.org/abs/1404.1100
+  https://stats.stackexchange.com/questions/79043/why-pca-of-data-by-means-of-svd-of-the-data
+
+  Strategy:
+  * Normalize X
+  * Get correlation matrix (or kernel-based similarity matrix)
+  * Decompose with SVD
+  * Eigenvalues = diagm(Σ) — Sum to find # directions to meet variance threshold
+  * Projection = XV
   =#
 
-  # Center and normalize X
+  # Translate and scale to Xν ~ N(0, 1)
   n = size(X, 1)
-  Xµ = X .- repmat(mean(X, 1), 1, n) # Subtract columnwise means from each row
-  Xν = Xµ ./ sqrt(n - 1)
+  Xµ = X - repmat(mean(X, 1), n) # Set µ = 0
+  Xν = Xν ./ repmat(std(X, 1), n) # Set σ = 1
 
-  # FIXME: DO WE NEED TO NORMALIZE? OR JUST CENTER?
+  sim = X'X ./ (n - 1) # TODO: This is where we'll swap in the Gaussian kernel
 
-  U, Σ, V = svd(Xν)
-  @show U
-  @show Σ
-  @show V
+  U, Σ, V = svd(sim) # TODO: svdfact, then extract Σ and V — we don't need U
 
-  # Determine how many components we need
-  # to preserve the desired proportion of variance
-  # FIXME: Do we need to sort Σ in descending order?
-  Σd = diagm(Σ)
-  var = Σd .* Σd
-  totalvar = sum(var[:])
+  # Determine how many components we need in order to preserve
+  # the desired proportion of variance
+  # Σ comes sorted in descending order
+  totalvar = sum(Σ)
   pvar = 0.0
   k = 0
   while pvar / totalvar < varratio
     k += 1
-    pvar += var[k,k]
+    pvar += var[k]
   end
 
-  # FIXME: projection = U[:,1:k] * Σd[1:k,1:k]
-  # Do we need to add means back to decenter?
-  # Or get the projection the other way, X * V?
-
-  # FIXME: Is this interpretation correct? Or are principal axes in U, not V? (since Shlens assumes X has samples in columns)
+  # FIXME: Equivalent to Xν * V? CHECK IN CONSOLE
+  # Equivalent when truncated before rather than after multiplication?
+  U[:,1:k] * Σd[1:k,1:k], V[:,1:k]
 end

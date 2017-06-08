@@ -169,10 +169,10 @@ function kPCA( X; varratio=.99 )
 
   # Center and normalize X
   n = size(X, 1)
-  Xµ = X .- repmat(mean(X, 1), 1, n)  # Subtract columnwise means from each row
-  Xnorm = Xµ ./ sqrt(n - 1)
+  Xµ = X - repmat(mean(X, 1), n)  # Subtract columnwise means from each row
+  Xν = Xµ ./ sqrt(n - 1)
 
-  U, Σ, PC = svd(Xnorm)
+  U, Σ, PC = svd(Xν)
 
   # Determine how many components we need
   # to preserve the desired proportion of variance
@@ -192,8 +192,6 @@ function kPCA( X; varratio=.99 )
 end
 
 function main()
-  # FIXME: Rewrite mean() with mean(X,2) etc — in extractFeatures, PCA
-
   sourcePath = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/lp.wav"
 
   # TODO: Need higher resolution in the time domain, say step=.1s
@@ -212,23 +210,6 @@ function main()
   =#
 
   # TODO: Rewrite with svd (remember to 0-center), with a Gaussian kernel
-  # https://stackoverflow.com/questions/3181593/matlab-is-running-out-of-memory-but-it-should-not-be/3181851#3181851
 end
 
 main()
-
-# FIXME: Is ICA appropriate here? Kernel PCA?
-# ICA does not seem really appropriate, since the different dimensions of the feature space
-# here do not correspond to independent series of observations along the lines of
-# sources in a cocktail party problem or regions of an image
-# Maybe FIRST apply PCA/svd to reduce dimensionality, THEN apply ICA?
-# * PCA to reduce dimensionality
-# * ICA to maximize statistical independence / joint entropy among basis vectors
-# https://stats.stackexchange.com/questions/97704/does-ica-require-to-run-pca-first
-# * How do you decide optimal number of ICs?
-# https://stats.stackexchange.com/questions/94463/what-are-the-advantages-of-kernel-pca-over-standard-pca
-
-# Kernel PCA -- nonlinear dim reduction
-
-# NOTES
-# Huber penalty to regress with outliers/noisy samples?
