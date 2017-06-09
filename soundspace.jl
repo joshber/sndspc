@@ -23,7 +23,7 @@ Inspirations:
   dimensionality reduction ensemble approach (2013)
 =#
 
-using StatsBase, MultivariateStats
+using StatsBase#, MultivariateStats
 using WAV, DSP, MFCC
 #using GR, GLVisualize # ObjectiveFunction needs v0.6
 using Plots
@@ -87,7 +87,6 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   # Without the ., ~() would pull elements from across the columns, yielding rowwise ~
   mfγ = skewness.(cols)
   mfkur = kurtosis.(cols)
-
 
   #
   # Spectral flatness
@@ -160,56 +159,84 @@ function constructFeatureSpace( samples, fs )
   X
 end
 
-function kPCA( X; varratio=.99 )
+function standardize( X )
   #=
   X is (n, d): n samples, d dimensions
-  https://arxiv.org/abs/1404.1100
+  Returns:
+  * X translated and scaled to N(0, 1)
+  * n
+  =#
+  n = size(X,1)
+  ( X - repmat(mean(X, 1), n) ) ./ repmat(std(X, 1), n), n
+end
+
+function embed( X; minvar=.99 )
+  #=
+  X is (n, d): n samples, d dimensions
+
+  Performs PCA on X. TODO: Substitute Gaussian kernel for correlation
+
+  Returns:
+  * A projection of standardized X onto the first k principal directions,
+    where those k directions account for at least minvar of the total variance
+  * The first k principal directions as a matrix, with PDs in columns
+    (projection basis)
+
+  Principal component analysis is one of those things that makes less sense
+  the more you think about it. Confusion abounds: Samples in rows or in columns,
+  decompose the sample matrix or the covariance matrix, choice of decomposition
+  (eig vs svd), efficiency and numerical stability of different strategies.
+  I've found these helpful:
+
   https://stats.stackexchange.com/questions/134282/relationship-between-svd-and-pca-how-to-use-svd-to-perform-pca
+  https://arxiv.org/abs/1404.1100
+  https://stats.stackexchange.com/questions/79043/why-pca-of-data-by-means-of-svd-of-the-data
+
+  Strategy:
+  * Standardize X
+  * Get correlation matrix (TODO: kernel-based similarity matrix)
+  * Decompose with SVD
+  * Eigenvalues = S — Sum to find # directions to meet variance threshold
+  * Projection = XV (standardized X)
   =#
 
-  # Center and normalize X
-  n = size(X, 1)
-  Xµ = X - repmat(mean(X, 1), n)  # Subtract columnwise means from each row
-  Xν = Xµ ./ sqrt(n - 1)
+  Xs, n = standardize(X)
 
-  U, Σ, PC = svd(Xν)
+  sim = Xs'Xs / (n - 1) # TODO: This is where we'll swap in the Gaussian kernel
 
-  # Determine how many components we need
-  # to preserve the desired proportion of variance
-  Σd = diagm(Σ)
-  var = Σd .* Σd
-  totalvar = sum(var[:])
+  F = svdfact(sim)
+  S, V = F[:S], F[:V]
+
+  # Determine how many principal directions we need
+  # in order to preserve the desired proportion of variance
+  # S comes sorted in descending order
+  totalvar = sum(S)
   pvar = 0.0
-  i = 0
-  while pvar / totalvar < varratio
-    i += 1
-    pvar += var[i,i]
+  k = 0
+  while pvar / totalvar < minvar
+    k += 1
+    pvar += S[k]
   end
 
-  # FIXME: Do we need to transpose PC to make this jibe with Shlens' setup (where X is tranpose relative to our X)?
-  # TODO: Step through var, counting columns until total variance ≥ varratio
-  # Then project PCs back on Xµ
+  Xs * V[:,1:k], V[:,1:k]
 end
 
 function main()
   sourcePath = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/lp.wav"
 
-  # TODO: Need higher resolution in the time domain, say step=.1s
+  # TODO: Need higher resolution in the time domain, say 10fps
   # But that froze my MBA
-  featureFps = 10
+  featureFps = 5
 
   X = constructFeatureSpace(extractSamples(sourcePath, 3, 1/featureFps)...)
-  pca = fit(PCA, X; pratio=.95, method=:svd)
-  @show pca
+  Xproj, projBasis = embed(X)
 
   # 3D animation of PCs against time, with PC value on vertical
   #=anim = @animate for i in 1 : size(pca,1)
     # plot( ... ) for one frame
   end
-  gif(anim, "soundspace.gif", fps=featureFramerate)
+  gif(anim, "soundspace.gif"; fps=featureFramerate)
   =#
-
-  # TODO: Rewrite with svd (remember to 0-center), with a Gaussian kernel
 end
 
 main()
