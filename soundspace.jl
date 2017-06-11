@@ -272,12 +272,17 @@ function main()
 
   sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
     #=
-    With Inshriach.wav as test data and linear PCA embedding,
+    With Inshriach.wav as training data and linear PCA embedding,
     .99 variance gets us from 180 to 118 features,
     .95 to 84
     .90 to 64
     .50 to  9
+
     So even for low-structure ambient-type sound, the feature space is highly informative
+
+    What to do with/about the fact that the data is highly autocorrelated?
+    Does not seem to both the fMRI people.
+    
     NEXT STEP: See if Gaussian PCA affords better compression
     =#
 
