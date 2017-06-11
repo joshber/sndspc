@@ -10,23 +10,23 @@ Josh Berson, josh@joshberson.net
 May 2017
 
 What:
-- Extract spectral envelope features from short segments of an audio recording
-- Embed feature space in a lower-dim space suitable for visualization and learning
+* Extract spectral envelope features from short segments of an audio recording
+* Embed feature space in a lower-dim space suitable for visualization and learning
 
 Why:
-- Explore ways of heuristically representing phenomenologically significant
+* Explore ways of heuristically representing phenomenologically significant
   features of sound and observing how they change over time
 
 Inspirations:
-- Nadav Hochman's work on style spaces for image social media
-- Dupont and Ravet, Improved audio classification using a novel non-linear
+* Nadav Hochman's work on style spaces for image social media
+* Dupont and Ravet, Improved audio classification using a novel non-linear
   dimensionality reduction ensemble approach (2013)
 =#
 
 using StatsBase#, MultivariateStats
 using WAV, DSP, MFCC
 #using GR, GLVisualize # ObjectiveFunction needs v0.6
-using Plots
+using Plots # !! inconsistent segfaults loading Plots
 
 
 function extractSamples( path, len = 3, step = len/2 )
@@ -42,10 +42,10 @@ function extractSamples( path, len = 3, step = len/2 )
   step = Int64(floor(step * fs))
 
   # Extract samples of length len at intervals step
-  # Array{Float64, 2}: stereo sampling
+  # Array{Float64,2}: stereo sampling
   p = 1
   n = Int64(floor((size(source, 1) - (len - step)) / step))
-  samples = Array{Array{Float64, 2}}(n)
+  samples = Array{Array{Float64,2}}(n)
   for i in 1:n
     samples[i] = source[p : p + len - 1, 1:2]
     p += step
@@ -81,15 +81,19 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   # size(cols) == 39
   cols = [ view(mfc,:,c) for c in 1:size(mfc,2) ]
 
-  mfµ = mean(mfc, 1) # mfµ = mean.(cols)
-  mfσ2 = var(mfc, 1) # mfσ2 = var.(cols)
-
   # Without the ., ~() would pull elements from across the columns, yielding rowwise ~
+  # Use .(cols) for mean and var even though there's an optional dimension arg,
+  # otherwise the vector has the wrong orientation for concatenation at the end
+  mfµ = mean.(cols)
+  mfσ2 = var.(cols)
   mfγ = skewness.(cols)
   mfkur = kurtosis.(cols)
 
   #
   # Spectral flatness
+
+  # TODO? More sophisticated approach to channel blending:
+  # Sum/take higher-energy channel if ≥ .95 energy (say) is in one channel
 
   mono = (sample[:,1] .+ sample[:,2]) ./ 2 # Average channels to get mono signal
   spec = spectrogram(mono; fs=fs, window=hanning)
@@ -99,9 +103,9 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   # Log-bin the power spectrum down to sfmin Hz
   fbands = size(pow,1)
   binshifts = logbins(fs, sfmin, sfmax)
-    # N.b., assert(fbands >> binshifts[end] ≥ 2) — no problem for reasonable sfmax
+    # !! assert(fbands >> binshifts[end] ≥ 2) — no problem for reasonable sfmax
   nbins = length(binshifts)
-  bins = Array{Array{Float64, 2}}(nbins)
+  bins = Array{Array{Float64,2}}(nbins)
   for i in 1:nbins
     bins[i] = pow[ fbands >> binshifts[i] + 1 : fbands >> (binshifts[i] - 1), 1:end ]
       # fbands >> i + 1 bc we have one additional band, for 0.0Hz
@@ -194,7 +198,7 @@ function embed( X; minvar=.99 )
 
   Strategy:
   * Standardize X
-  * Get correlation matrix (TODO: kernel-based similarity matrix)
+  * Get similarity matrix (correlation or kernel-based)
   * Decompose with SVD
   * Eigenvalues = S — Sum to find # directions to meet variance threshold
   * Projection = XV (standardized X)
@@ -202,7 +206,9 @@ function embed( X; minvar=.99 )
 
   Xs, n = standardize(X)
 
-  sim = Xs'Xs / (n - 1) # TODO: This is where we'll swap in the Gaussian kernel
+  # Correlation (standardized covariance)
+  # TODO: This is where we'll swap in the Gaussian kernel
+  sim = Xs'Xs / (n - 1)
 
   F = svdfact(sim)
   S, V = F[:S], F[:V]
@@ -217,19 +223,45 @@ function embed( X; minvar=.99 )
     k += 1
     pvar += S[k]
   end
+  #=
+  # More idiomatic but modest redundant summing and consing
+  varsums = [ sum(S[1:i] for i in 1:length(S) ]
+  k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
+  =#
 
   Xs * V[:,1:k], V[:,1:k]
 end
 
 function main()
-  sourcePath = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/lp.wav"
+  #=
+  TODO: Prepend a step to the pipeline to
+  * Stream a long audio file
+  * Split it into (60s + mod(60s, sampleLen)) segments with (sampleLen - step) overlaps
+  * Write the segments to a folder
+  * Apply constructFeatureSpace(...) to the whole folder
+  * Concatenate the feature spaces
+  * Embed the entire space at once
+  =#
+  
+  sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
+    #=
+    With Inshriach.wav as test data and linear PCA embedding,
+    .99 variance gets us from 180 to 118 features,
+    .95 to 84
+    .90 to 64
+    .50 to  9
+    So even for low-structure ambient-type sound, the feature space is highly informative
+    NEXT STEP: See if Gaussian PCA affords better compression
+    =#
 
   # TODO: Need higher resolution in the time domain, say 10fps
   # But that froze my MBA
   featureFps = 5
 
   X = constructFeatureSpace(extractSamples(sourcePath, 3, 1/featureFps)...)
-  Xproj, projBasis = embed(X)
+  Xproj, projBasis = embed(X; minvar=.5)
+  @show size(X)
+  @show size(Xproj)
 
   # 3D animation of PCs against time, with PC value on vertical
   #=anim = @animate for i in 1 : size(pca,1)
