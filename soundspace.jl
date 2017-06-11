@@ -105,7 +105,7 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   binshifts = logbins(fs, sfmin, sfmax)
     # !! assert(fbands >> binshifts[end] ≥ 2) — no problem for reasonable sfmax
   nbins = length(binshifts)
-  bins = Array{Array{Float64,2}}(nbins)
+  bins = Array{Array{Float64, 2}}(nbins)
   for i in 1:nbins
     bins[i] = pow[ fbands >> binshifts[i] + 1 : fbands >> (binshifts[i] - 1), 1:end ]
       # fbands >> i + 1 bc we have one additional band, for 0.0Hz
@@ -153,9 +153,11 @@ function constructFeatureSpace( samples, fs )
   What we need is a two-dimensional array
   =#
   sfmin, sfmax = 200, 12000
-  # 156 MFCC features + 4n for spectral flatness
-  # where n is # log bins with lower bound in [sfmin,sfmax]Hz
+
+  # 156 MFCC features (13 MFCCs + ∇ and Hessian · 4 moments)
+  # + 4n for spectral flatness where n is # log bins with lower bound in [sfmin,sfmax]Hz
   nfeatures = 156 + 4 * length(logbins(fs, sfmin, sfmax))
+
   X = Array{Float64, 2}(length(samples), nfeatures)
   for i in 1:length(samples)
     X[i, 1:end] = extractFeatures(samples[i], fs, sfmin, sfmax)[1:end]
@@ -242,7 +244,7 @@ function main()
   * Concatenate the feature spaces
   * Embed the entire space at once
   =#
-  
+
   sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
     #=
     With Inshriach.wav as test data and linear PCA embedding,
