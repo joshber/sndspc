@@ -23,7 +23,7 @@ Inspirations:
   dimensionality reduction ensemble approach (2013)
 =#
 
-using StatsBase#, MultivariateStats
+using StatsBase, Distances#, MultivariateStats
 using WAV, DSP, MFCC
 #using GR, GLVisualize # ObjectiveFunction needs v0.6
 using Plots # !! inconsistent segfaults loading Plots
@@ -152,6 +152,7 @@ function constructFeatureSpace( samples, fs )
   Dot vectorization would yield a vector of vectors
   What we need is a two-dimensional array
   =#
+
   sfmin, sfmax = 200, 12000
 
   # 156 MFCC features (13 MFCCs + ∇ and Hessian · 4 moments)
@@ -198,6 +199,13 @@ function embed( X; minvar=.99 )
   https://arxiv.org/abs/1404.1100
   https://stats.stackexchange.com/questions/79043/why-pca-of-data-by-means-of-svd-of-the-data
 
+  For Radial Basis Function (Gaussian) kernel:
+
+  http://sebastianraschka.com/Articles/2014_kernel_pca.html
+  http://www.eric-kim.net/eric-kim-net/posts/1/kernel_trick.html
+  https://stats.stackexchange.com/questions/131138/what-makes-the-gaussian-kernel-so-magical-for-pca-and-also-in-general
+  https://stats.stackexchange.com/questions/168051/kernel-svm-i-want-an-intuitive-understanding-of-mapping-to-a-higher-dimensional/168082
+
   Strategy:
   * Standardize X
   * Get similarity matrix (correlation or kernel-based)
@@ -211,6 +219,23 @@ function embed( X; minvar=.99 )
   # Correlation (standardized covariance)
   # TODO: This is where we'll swap in the Gaussian kernel
   sim = Xs'Xs / (n - 1)
+  #=
+  #
+  # Sketch for RBF (Gaussian) kernel
+
+  # Gaussian variance is free parameter
+  σ2 = 1
+  gamma = 1 / (2 * σ2)
+
+  L22 = pairwise(SqEuclidean(), Xs') # Squared L2 norms
+    # FIXME: Check ' — pairwise() operates on columns
+  sim = exp(-gamma * L22)
+
+  # 0-center the kernel matrix
+  cntr = ones(n, n) / n
+  sim = sim - cntr * sim - sim * cntr + cntr * sim * cntr
+    # FIXME: Check output against other centering formulae
+  =#
 
   F = svdfact(sim)
   S, V = F[:S], F[:V]
