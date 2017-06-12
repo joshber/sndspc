@@ -181,7 +181,7 @@ function embed( X; minvar=.99 )
   #=
   X is (n, d): n samples, d dimensions
 
-  Performs PCA on X. TODO: Substitute Gaussian kernel for correlation
+  Performs PCA on X
 
   Returns:
   * A projection of standardized X onto the first k principal directions,
@@ -206,6 +206,10 @@ function embed( X; minvar=.99 )
   https://stats.stackexchange.com/questions/131138/what-makes-the-gaussian-kernel-so-magical-for-pca-and-also-in-general
   https://stats.stackexchange.com/questions/168051/kernel-svm-i-want-an-intuitive-understanding-of-mapping-to-a-higher-dimensional/168082
 
+  Caveats:
+  * Kernel is n^2, whereas correlation is d^2, and n >> d
+  * Kernel-based method is nonparametric — Not good for imputing new samples
+
   Strategy:
   * Standardize X
   * Get similarity matrix (correlation or kernel-based)
@@ -216,33 +220,16 @@ function embed( X; minvar=.99 )
 
   Xs, n = standardize(X)
 
-  # Correlation (standardized covariance)
-  # TODO: This is where we'll swap in the Gaussian kernel
-  sim = Xs'Xs / (n - 1)
-  #=
-  #
-  # Sketch for RBF (Gaussian) kernel
+  # Construct correlation (standardized covariance) matrix
+  corr = Xs'Xs / (n - 1)
 
-  # Gaussian variance is free parameter
-  σ2 = 1
-  gamma = 1 / (2 * σ2)
-
-  L22 = pairwise(SqEuclidean(), Xs') # Squared L2 norms
-    # FIXME: Check ' — pairwise() operates on columns
-  sim = exp(-gamma * L22)
-
-  # 0-center the kernel matrix
-  cntr = ones(n, n) / n
-  sim = sim - cntr * sim - sim * cntr + cntr * sim * cntr
-    # FIXME: Check output against other centering formulae
-  =#
-
-  F = svdfact(sim)
+  F = svdfact(corr)
   S, V = F[:S], F[:V]
 
   # Determine how many principal directions we need
   # in order to preserve the desired proportion of variance
   # S comes sorted in descending order
+  minvar = min(minvar, 1.0)
   totalvar = sum(S)
   pvar = 0.0
   k = 0
@@ -252,22 +239,52 @@ function embed( X; minvar=.99 )
   end
   #=
   # More idiomatic but modest redundant summing and consing
-  varsums = [ sum(S[1:i] for i in 1:length(S) ]
+  varsums = [ sum(S[1:i]) for i in 1:length(S) ]
   k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
   =#
 
   Xs * V[:,1:k], V[:,1:k]
 end
 
+function embedRbf( X; minvar=.99, gamma=10.0 )
+  #=
+  Radial Basis Function (Gaussian) kernel
+  TO COME
+  =#
+
+  L22 = pairwise(SqEuclidean(), X') # Squared L2 norms. pairwise() operates on columns
+  K = exp.(-gamma * L22)
+
+  # 0-center the kernel matrix
+  cntr = ones(n, n) / n
+  K = K - cntr * K - K * cntr + cntr * K * cntr
+    # FIXME: Check output against other centering formulas
+
+  F = svdfact(K)
+  S, V = F[:S], F[:V]
+
+  varsums = [ sum(S[1:i]) for i in 1:length(S) ]
+  k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
+
+  V[:,1:k]
+end
+
 function main()
   #=
-  TODO: Prepend a step to the pipeline to
+  TODO
+  1. Prepend a step to the pipeline to
   * Stream a long audio file
   * Split it into (60s + mod(60s, sampleLen)) segments with (sampleLen - step) overlaps
   * Write the segments to a folder
   * Apply constructFeatureSpace(...) to the whole folder
   * Concatenate the feature spaces
   * Embed the entire space at once
+
+  2. Use embedding to sequence samples into a new composition
+  * Annotate Xproj with index column
+  * Sort in desc order by principal directions
+  * Use permuted index to resort samples
+  * Write/stream
   =#
 
   sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
@@ -282,15 +299,17 @@ function main()
 
     What to do with/about the fact that the data is highly autocorrelated?
     Does not seem to both the fMRI people.
-    
-    NEXT STEP: See if Gaussian PCA affords better compression
+
+    NEXT STEP: See if RBF PCA affords better compression
     =#
 
   # TODO: Need higher resolution in the time domain, say 10fps
   # But that froze my MBA
-  featureFps = 5
+  featureFps = 5 #10
 
-  X = constructFeatureSpace(extractSamples(sourcePath, 3, 1/featureFps)...)
+  samples, fs = extractSamples(sourcePath, 3, 1/featureFps)
+  X = constructFeatureSpace(samples, fs)
+
   Xproj, projBasis = embed(X; minvar=.5)
   @show size(X)
   @show size(Xproj)
