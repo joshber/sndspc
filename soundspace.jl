@@ -19,6 +19,7 @@ Why:
 
 Inspirations:
 * Nadav Hochman's work on style spaces for image social media
+  http://nadavhochman.net/
 * Dupont and Ravet, Improved audio classification using a novel non-linear
   dimensionality reduction ensemble approach (2013)
   Idea of combining MFCCs and fbanded spectral flatness then projecting
@@ -35,15 +36,15 @@ using StatsBase, Distances
   # Nonlinear embedding: https://manifoldlearningjl.readthedocs.io/en/latest/
 
 using WAV, DSP, MFCC
+  # N.b.: MFCC does not work with Julia 0.6 — error in rasta.jl
 
-using GR#, GLVisualize
-using Plots # !! inconsistent segfaults loading Plots — related to ObjectiveFunction problem in Julia v0.5?
+#using GLVisualize, GLAbstraction, Reactive
 
 
-function extractSamples( path, len = 3, step = len/2 )
+function extractShingles( path, len = 3, step = len/2 )
   #=
-  Read an audio file, construct an array of samples
-  Returns samples, sample rate
+  Read an audio file, construct an array of shingles
+  Returns shingles, sample rate
   =#
 
   source, fs = wavread(path)
@@ -52,20 +53,20 @@ function extractSamples( path, len = 3, step = len/2 )
   len = Int64(floor(len * fs))
   step = Int64(floor(step * fs))
 
-  # Extract samples of length len at intervals step
+  # Extract shingles of length len at intervals step
   # Array{Float64,2}: stereo sampling
   p = 1
   n = Int64(floor((size(source, 1) - (len - step)) / step))
-  samples = Array{Array{Float64,2}}(n)
+  shingles = Array{Array{Float64,2}}(n)
   for i in 1:n
-    samples[i] = source[p : p + len - 1, 1:2]
+    shingles[i] = source[p : p + len - 1, 1:2]
     p += step
   end
 
-  samples, fs
+  shingles, fs
 end
 
-function extractFeatures( sample, fs, sfmin, sfmax )
+function extractFeatures( shingle, fs, sfmin, sfmax )
   #=
   Generates a feature vector for the spectral envelope of an audio signal
   Features:
@@ -82,7 +83,7 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   # See https://github.com/davidavdav/MFCC.jl
   # Default is 63 filterbanks — adjust with kwarg nbands
   # augtype=::delta means get first and second derivatives too
-  mfc = feacalc(sample; sr=fs, augtype=:ddelta, sadtype=:none, normtype=:none, defaults=:wbspeaker, numcep=13)
+  mfc = feacalc(shingle; sr=fs, augtype=:ddelta, sadtype=:none, normtype=:none, defaults=:wbspeaker, numcep=13)
   mfc = mfc[1] # Discard metadata
 
   #
@@ -106,7 +107,7 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   # TODO: More sophisticated approach to channel blending:
   # Sum/take higher-energy channel if ≥ .95 energy (say) is in one channel
 
-  mono = (sample[:,1] .+ sample[:,2]) ./ 2 # Average channels to get mono signal
+  mono = (shingle[:,1] .+ shingle[:,2]) ./ 2 # Average channels to get mono signal
   spec = spectrogram(mono; fs=fs, window=hanning)
     # Default STFT frame span is length(signal)/8). Default overlap is .5
   pow = power(spec)
@@ -158,7 +159,7 @@ function logbins( fs, fmin, fmax )
   [ i for i in 1:11 if b[i] ]
 end
 
-function constructFeatureSpace( samples, fs )
+function constructFeatureSpace( shingles, fs )
   #=
   Dot vectorization would yield a vector of vectors
   What we need is a two-dimensional array
@@ -170,9 +171,9 @@ function constructFeatureSpace( samples, fs )
   # + 4n for spectral flatness where n is # log bins with lower bound in [sfmin,sfmax]Hz
   nfeatures = 156 + 4 * length(logbins(fs, sfmin, sfmax))
 
-  X = Array{Float64, 2}(length(samples), nfeatures)
-  for i in 1:length(samples)
-    X[i, 1:end] = extractFeatures(samples[i], fs, sfmin, sfmax)[1:end]
+  X = Array{Float64, 2}(length(shingles), nfeatures)
+  for i in 1:length(shingles)
+    X[i, 1:end] = extractFeatures(shingles[i], fs, sfmin, sfmax)[1:end]
   end
   X
 end
@@ -223,6 +224,10 @@ function embedPCA( X; minvar=.99 )
   # in order to preserve the desired proportion of variance
   # S comes sorted in descending order
   minvar = min(minvar, 1.0)
+  varsums = [ sum(S[1:i]) for i in 1:length(S) ]
+  k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
+  #=
+  # Less idiomatic but eliminates redundant summing and consing
   totalvar = sum(S)
   pvar = 0.0
   k = 0
@@ -230,10 +235,6 @@ function embedPCA( X; minvar=.99 )
     k += 1
     pvar += S[k]
   end
-  #=
-  # More idiomatic but modest redundant summing and consing
-  varsums = [ sum(S[1:i]) for i in 1:length(S) ]
-  k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
   =#
 
   Xs * V[:,1:k], V[:,1:k]
@@ -311,7 +312,7 @@ function main()
 
   sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
     #=
-    With Inshriach.wav as training data and linear PCA embedding,
+    With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA embedding,
     .99 variance gets us from 180 to 118 features,
     .95 to 84
     .90 to 64
@@ -330,8 +331,8 @@ function main()
   featureFps = 1 #10
 
   # Shingle the source and construct a feature space
-  samples, fs = extractSamples(sourcePath, 8, 1/featureFps) # shingle length == 8s
-  X = constructFeatureSpace(samples, fs)
+  shingles, fs = extractShingles(sourcePath, 8, 1/featureFps) # shingle length == 8s
+  X = constructFeatureSpace(shingles, fs)
 
   # Project the feature space into principal component space
   # and take a minimum-variance subspace
@@ -339,9 +340,35 @@ function main()
   @show size(X)
   @show size(Xproj)
 
-  # Sort the shingles by projected feature-space values
-  # https://stackoverflow.com/questions/7365814/in-place-array-reordering
-  perm = sortperm(Xproj, rev=false)
+  #=
+  Sort the shingles by projected feature-space values
+
+  Doing this efficiently, i.e., O(n) time and O(1) space, is tricky:
+  https://stackoverflow.com/questions/7365814/in-place-array-reordering
+
+  For simplicity, initially, we'll just cons up a new array
+  and hope array malloc is efficient in Julia
+
+  1. Get the permutation by sorting the projected-feature array
+  2. Traverse the permutation, building a new array
+  =#
+  n = length(shingles)
+  sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
+    # Sum of squares. TODO: This does not feel idiomatic, but I'm at a bit of a loss
+  perm = sortperm(sumsq) # FIXME: rev=true?
+
+  shinglesReordered = Array{Array{Float64,2}}(n) # Array{Float64,2}: Stereo source
+  # TODO: Vectorize?
+  for i in 1:n
+    shinglesReordered[i] = shingles[perm[i]]
+  end
+
+  # Write the new composition
+  conc = vcat(shinglesReordered...)
+  @show typeof(conc)
+  @show size(conc)
+  #@show conc
+  wavwrite(conc, "out.wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
   # TODO: Animated phenomenogram of projected features against time, with features on vertical
   # Cf. http://gr-framework.org/examples/audio_ex3.html
