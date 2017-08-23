@@ -1,32 +1,43 @@
 #=
-FIXME--
-- Fewer SF features -- ≤12KHz, ≥200?, more fband resolution, use spectrogram defaults
-- Cut feature vector to suit fs
-=#
-#=
-soundpattern.jl: Pattern Spaces for Sound
+TODO: CHECK MORE IDIOMATIC FORM OF DIM REDUCTION
+
+soundspace.jl: Pattern Spaces for Sound
 
 Josh Berson, josh@joshberson.net
-May 2017
+May, August 2017
 
 What:
-* Extract spectral envelope features from short segments of an audio recording
-* Embed feature space in a lower-dim space suitable for visualization and learning
+1. Extract spectral envelope features from short segments (shingles) of an audio recording
+2. Project feature space into a lower-dim space suitable for visualization and learning
+3. Aug 2017: Sort segments in projected feature space and catenate —
+   a form of procedural composition using (ambient) recorded sound as input
+4. TODO: Render an animated PHENOMENOGRAM of projected feature space for the original source
 
 Why:
 * Explore ways of heuristically representing phenomenologically significant
-  features of sound and observing how they change over time
+  features of sound and observing (and auditioning) how they change over time
 
 Inspirations:
 * Nadav Hochman's work on style spaces for image social media
 * Dupont and Ravet, Improved audio classification using a novel non-linear
   dimensionality reduction ensemble approach (2013)
+  Idea of combining MFCCs and fbanded spectral flatness then projecting
+  comes from Dupont and Ravet
+* Hiroki Sasajima, Colony (Impulsive Habitat, IHab040, 2012)
+  http://www.impulsivehabitat.com/releases/ihab040.htm
+  (An album of ambient insect noise)
+* See also Berson, “Sound and Pain” https://goo.gl/Qn2HTI
 =#
 
-using StatsBase, Distances#, MultivariateStats
+using StatsBase, Distances
+#using MultivariateStats # (decided to roll my own PCA)
+#using ManifoldLearning
+  # Nonlinear embedding: https://manifoldlearningjl.readthedocs.io/en/latest/
+
 using WAV, DSP, MFCC
-#using GR, GLVisualize # ObjectiveFunction needs v0.6
-using Plots # !! inconsistent segfaults loading Plots
+
+using GR#, GLVisualize
+using Plots # !! inconsistent segfaults loading Plots — related to ObjectiveFunction problem in Julia v0.5?
 
 
 function extractSamples( path, len = 3, step = len/2 )
@@ -92,7 +103,7 @@ function extractFeatures( sample, fs, sfmin, sfmax )
   #
   # Spectral flatness
 
-  # TODO? More sophisticated approach to channel blending:
+  # TODO: More sophisticated approach to channel blending:
   # Sum/take higher-energy channel if ≥ .95 energy (say) is in one channel
 
   mono = (sample[:,1] .+ sample[:,2]) ./ 2 # Average channels to get mono signal
@@ -177,7 +188,7 @@ function standardize( X )
   ( X - repmat(mean(X, 1), n) ) ./ repmat(std(X, 1), n), n
 end
 
-function embed( X; minvar=.99 )
+function embedPCA( X; minvar=.99 )
   #=
   X is (n, d): n samples, d dimensions
 
@@ -198,24 +209,6 @@ function embed( X; minvar=.99 )
   https://stats.stackexchange.com/questions/134282/relationship-between-svd-and-pca-how-to-use-svd-to-perform-pca
   https://arxiv.org/abs/1404.1100
   https://stats.stackexchange.com/questions/79043/why-pca-of-data-by-means-of-svd-of-the-data
-
-  For Radial Basis Function (Gaussian) kernel:
-
-  http://sebastianraschka.com/Articles/2014_kernel_pca.html
-  http://www.eric-kim.net/eric-kim-net/posts/1/kernel_trick.html
-  https://stats.stackexchange.com/questions/131138/what-makes-the-gaussian-kernel-so-magical-for-pca-and-also-in-general
-  https://stats.stackexchange.com/questions/168051/kernel-svm-i-want-an-intuitive-understanding-of-mapping-to-a-higher-dimensional/168082
-
-  Caveats:
-  * Kernel is n^2, whereas correlation is d^2, and n >> d
-  * Kernel-based method is nonparametric — Not good for imputing new samples
-
-  Strategy:
-  * Standardize X
-  * Get similarity matrix (correlation or kernel-based)
-  * Decompose with SVD
-  * Eigenvalues = S — Sum to find # directions to meet variance threshold
-  * Projection = XV (standardized X)
   =#
 
   Xs, n = standardize(X)
@@ -246,10 +239,29 @@ function embed( X; minvar=.99 )
   Xs * V[:,1:k], V[:,1:k]
 end
 
-function embedRbf( X; minvar=.99, gamma=10.0 )
+function embedRBF( X; minvar=.99, gamma=10.0 )
   #=
   Radial Basis Function (Gaussian) kernel
-  TO COME
+
+  http://sebastianraschka.com/Articles/2014_kernel_pca.html
+  http://www.eric-kim.net/eric-kim-net/posts/1/kernel_trick.html
+  https://stats.stackexchange.com/questions/131138/what-makes-the-gaussian-kernel-so-magical-for-pca-and-also-in-general
+  https://stats.stackexchange.com/questions/168051/kernel-svm-i-want-an-intuitive-understanding-of-mapping-to-a-higher-dimensional/168082
+
+  Caveats:
+  * Kernel is n^2, whereas correlation is d^2, and n >> d
+  * Kernel-based method is nonparametric — Not good for imputing new samples
+
+  Strategy:
+  * Standardize X
+  * Get similarity matrix (correlation or kernel-based)
+  * Decompose with SVD
+  * Eigenvalues = S — Sum to find # directions to meet variance threshold
+  * Projection = XV (standardized X)
+
+  TODO: Not yet working, or at least, I don't yet know how to interpret the result
+  I.e., I seem to get zero dimensionality reduction — conserved covariance requires
+  the entire transformed array, which is of Dim > the input X
   =#
 
   L22 = pairwise(SqEuclidean(), X') # Squared L2 norms. pairwise() operates on columns
@@ -263,6 +275,9 @@ function embedRbf( X; minvar=.99, gamma=10.0 )
   F = svdfact(K)
   S, V = F[:S], F[:V]
 
+  # Determine how many principal directions we need
+  # in order to preserve the desired proportion of variance
+  # S comes sorted in descending order
   varsums = [ sum(S[1:i]) for i in 1:length(S) ]
   k = find( pvar -> pvar / varsums[end] ≥ minvar, varsums)[1]
 
@@ -271,20 +286,27 @@ end
 
 function main()
   #=
-  TODO
-  1. Prepend a step to the pipeline to
-  * Stream a long audio file
-  * Split it into (60s + mod(60s, sampleLen)) segments with (sampleLen - step) overlaps
-  * Write the segments to a folder
-  * Apply constructFeatureSpace(...) to the whole folder
-  * Concatenate the feature spaces
-  * Embed the entire space at once
+  Pattern space pipeline
 
-  2. Use embedding to sequence samples into a new composition
-  * Annotate Xproj with index column
-  * Sort in desc order by principal directions
-  * Use permuted index to resort samples
-  * Write/stream
+  1. Shingle the source
+  2. Generate a feature space on a per-shingle basis
+  3. Project the feature space via PCA or some nonlinear technique
+     (RBF PCA, Locally Linear Embedding, etc)
+  4. Sort the shingles according to values in the projected feature space
+  5. Catenate the sorted shingles to produce a new composition highlighting variation
+     (we hope) in perceptually significant features of the spectral envelope
+  6. TODO: Plot the projected features as a “phenomenogram” along the lines of
+     http://gr-framework.org/examples/audio_ex3.html
+
+  TODO:
+  Prepend a step to the pipeline to break the source up into manageable segments
+  (i.e., two-level segmenting to prevent the pipeline from choking on, say, my 2013 MBA)
+  1. Stream a long audio file
+  2. Split it into (60s + mod(60s, sampleLen)) segments with (sampleLen - step) overlaps
+  3. Write the segments to a folder
+  4. Apply constructFeatureSpace(...) to the whole folder
+  5. Concatenate the feature spaces
+  6. Project the entire space at once
   =#
 
   sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
@@ -298,27 +320,35 @@ function main()
     So even for low-structure ambient-type sound, the feature space is highly informative
 
     What to do with/about the fact that the data is highly autocorrelated?
-    Does not seem to both the fMRI people.
+    Does not seem to bother the fMRI people.
 
-    NEXT STEP: See if RBF PCA affords better compression
+    TODO: See if RBF PCA or other nonlinear methods afford better compression
     =#
 
-  # TODO: Need higher resolution in the time domain, say 10fps
-  # But that froze my MBA
-  featureFps = 5 #10
+  # TODO: For phenomenograms, though not for procedural composition,
+  # we need higher resolution in the time domain, say 10fps. But that froze my MBA
+  featureFps = 1 #10
 
-  samples, fs = extractSamples(sourcePath, 3, 1/featureFps)
+  # Shingle the source and construct a feature space
+  samples, fs = extractSamples(sourcePath, 8, 1/featureFps) # shingle length == 8s
   X = constructFeatureSpace(samples, fs)
 
-  Xproj, projBasis = embed(X; minvar=.5)
+  # Project the feature space into principal component space
+  # and take a minimum-variance subspace
+  Xproj, projBasis = embedPCA(X; minvar=.5)
   @show size(X)
   @show size(Xproj)
 
-  # 3D animation of PCs against time, with PC value on vertical
+  # Sort the shingles by projected feature-space values
+  # https://stackoverflow.com/questions/7365814/in-place-array-reordering
+  perm = sortperm(Xproj, rev=false)
+
+  # TODO: Animated phenomenogram of projected features against time, with features on vertical
+  # Cf. http://gr-framework.org/examples/audio_ex3.html
   #=anim = @animate for i in 1 : size(pca,1)
     # plot( ... ) for one frame
   end
-  gif(anim, "soundspace.gif"; fps=featureFramerate)
+  gif(anim, "phenomenogram.gif"; fps=featureFramerate)
   =#
 end
 
