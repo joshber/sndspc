@@ -1,7 +1,9 @@
 #=
-TODO: CHECK MORE IDIOMATIC FORM OF DIM REDUCTION
-
 soundspace.jl: Pattern Spaces for Sound
+
+TODO Next steps:
+1. Try LLE
+2. Try random recomposition
 
 Josh Berson, josh@joshberson.net
 May, August 2017
@@ -140,7 +142,7 @@ function extractFeatures( shingle, fs, sfmin, sfmax )
     sfγ[i] = skewness(sf)
     sfkur[i] = kurtosis(sf)
   end
-  # length(sfmean) == nbins, same for higher moments
+  # length(sfµ) == nbins, same for higher moments
 
   [ mfµ; mfσ2; mfγ; mfkur; sfµ; sfσ2; sfγ; sfkur ]
 end
@@ -162,7 +164,7 @@ end
 function constructFeatureSpace( shingles, fs )
   #=
   Dot vectorization would yield a vector of vectors
-  What we need is a two-dimensional array
+  What we need is a two-dimensional array, hence the for loop
   =#
 
   sfmin, sfmax = 200, 12000
@@ -197,7 +199,7 @@ function embedPCA( X; minvar=.99 )
 
   Returns:
   * A projection of standardized X onto the first k principal directions,
-    where those k directions account for at least minvar of the total variance
+    where those k directions account for at least minvar fraction of the total variance
   * The first k principal directions as a matrix, with PDs in columns
     (projection basis)
 
@@ -255,14 +257,14 @@ function embedRBF( X; minvar=.99, gamma=10.0 )
 
   Strategy:
   * Standardize X
-  * Get similarity matrix (correlation or kernel-based)
+  * Get similarity matrix (kernel-based)
   * Decompose with SVD
   * Eigenvalues = S — Sum to find # directions to meet variance threshold
   * Projection = XV (standardized X)
 
   TODO: Not yet working, or at least, I don't yet know how to interpret the result
   I.e., I seem to get zero dimensionality reduction — conserved covariance requires
-  the entire transformed array, which is of Dim > the input X
+  the entire transformed array, which is of Dim > Dim(X)
   =#
 
   L22 = pairwise(SqEuclidean(), X') # Squared L2 norms. pairwise() operates on columns
@@ -271,7 +273,7 @@ function embedRBF( X; minvar=.99, gamma=10.0 )
   # 0-center the kernel matrix
   cntr = ones(n, n) / n
   K = K - cntr * K - K * cntr + cntr * K * cntr
-    # FIXME: Check output against other centering formulas
+    # TODO: Check output against other centering formulas
 
   F = svdfact(K)
   S, V = F[:S], F[:V]
@@ -294,10 +296,23 @@ function main()
   3. Project the feature space via PCA or some nonlinear technique
      (RBF PCA, Locally Linear Embedding, etc)
   4. Sort the shingles according to values in the projected feature space
-  5. Catenate the sorted shingles to produce a new composition highlighting variation
+  5. Concatenate the sorted shingles to produce a new composition highlighting variation
      (we hope) in perceptually significant features of the spectral envelope
   6. TODO: Plot the projected features as a “phenomenogram” along the lines of
      http://gr-framework.org/examples/audio_ex3.html
+
+     With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA embedding,
+     .99 variance gets us from 180 to 118 features,
+     .95 to 84
+     .90 to 64
+     .50 to  9
+
+     So even for low-structure ambient-type sound, the feature space is highly informative
+
+     What to do with/about the fact that the data is highly autocorrelated?
+     Does not seem to bother the fMRI people.
+
+     TODO: See if RBF PCA or other nonlinear methods afford better compression
 
   TODO:
   Prepend a step to the pipeline to break the source up into manageable segments
@@ -310,28 +325,15 @@ function main()
   6. Project the entire space at once
   =#
 
-  sourcePath = "/Users/josh/Dropbox/Recordings/Inshriach/Inshriach.wav"
-    #=
-    With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA embedding,
-    .99 variance gets us from 180 to 118 features,
-    .95 to 84
-    .90 to 64
-    .50 to  9
-
-    So even for low-structure ambient-type sound, the feature space is highly informative
-
-    What to do with/about the fact that the data is highly autocorrelated?
-    Does not seem to bother the fMRI people.
-
-    TODO: See if RBF PCA or other nonlinear methods afford better compression
-    =#
+  path = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/"#"/Users/josh/Dropbox/Shirooni/Recordings/"
+  source = "lp"
 
   # TODO: For phenomenograms, though not for procedural composition,
   # we need higher resolution in the time domain, say 10fps. But that froze my MBA
   featureFps = 1 #10
 
   # Shingle the source and construct a feature space
-  shingles, fs = extractShingles(sourcePath, 8, 1/featureFps) # shingle length == 8s
+  shingles, fs = extractShingles("$(path)$(source).wav", 4, 1/featureFps)
   X = constructFeatureSpace(shingles, fs)
 
   # Project the feature space into principal component space
@@ -346,29 +348,19 @@ function main()
   Doing this efficiently, i.e., O(n) time and O(1) space, is tricky:
   https://stackoverflow.com/questions/7365814/in-place-array-reordering
 
-  For simplicity, initially, we'll just cons up a new array
-  and hope array malloc is efficient in Julia
+  For simplicity, we'll just cons up a new array
 
   1. Get the permutation by sorting the projected-feature array
   2. Traverse the permutation, building a new array
   =#
-  n = length(shingles)
   sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
     # Sum of squares. TODO: This does not feel idiomatic, but I'm at a bit of a loss
   perm = sortperm(sumsq) # FIXME: rev=true?
-
-  shinglesReordered = Array{Array{Float64,2}}(n) # Array{Float64,2}: Stereo source
-  # TODO: Vectorize?
-  for i in 1:n
-    shinglesReordered[i] = shingles[perm[i]]
-  end
+  shinglesReordered = [ shingles[perm[i]] for i in 1:length(shingles) ]
 
   # Write the new composition
   conc = vcat(shinglesReordered...)
-  @show typeof(conc)
-  @show size(conc)
-  #@show conc
-  wavwrite(conc, "out.wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+  wavwrite(conc, "$(path)out/$(source) out.wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
   # TODO: Animated phenomenogram of projected features against time, with features on vertical
   # Cf. http://gr-framework.org/examples/audio_ex3.html
