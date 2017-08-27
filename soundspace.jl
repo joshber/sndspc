@@ -2,8 +2,9 @@
 soundspace.jl: Pattern Spaces for Sound
 
 TODO Next steps:
-1. Try LLE
-2. Try random recomposition
+1. Filters: Lowpass, Bandpass
+2. Try LLE
+3. Try random recomposition
 
 Josh Berson, josh@joshberson.net
 May, August 2017
@@ -32,10 +33,7 @@ Inspirations:
 * See also Berson, “Sound and Pain” https://goo.gl/Qn2HTI
 =#
 
-using StatsBase, Distances
-#using MultivariateStats # (decided to roll my own PCA)
-#using ManifoldLearning
-  # Nonlinear embedding: https://manifoldlearningjl.readthedocs.io/en/latest/
+using StatsBase, Distances, ManifoldLearning
 
 using WAV, DSP, MFCC
   # N.b.: MFCC does not work with Julia 0.6 — error in rasta.jl
@@ -50,6 +48,10 @@ function extractShingles( path, len = 3, step = len/2 )
   =#
 
   source, fs = wavread(path)
+  # TODO: Filtering is causing segfaults in both Julia v.5 and .6
+  #f = digitalfilter(Lowpass(8000; fs=fs), Butterworth(2))
+  #f = digitalfilter(Bandpass(200, 8000; fs=fs), Butterworth(2))
+  #filt!(source, f, source)
 
   # Switch from seconds to frames
   len = Int64(floor(len * fs))
@@ -191,7 +193,7 @@ function standardize( X )
   ( X - repmat(mean(X, 1), n) ) ./ repmat(std(X, 1), n), n
 end
 
-function embedPCA( X; minvar=.99 )
+function projectPCA( X; minvar=.99 )
   #=
   X is (n, d): n samples, d dimensions
 
@@ -242,7 +244,7 @@ function embedPCA( X; minvar=.99 )
   Xs * V[:,1:k], V[:,1:k]
 end
 
-function embedRBF( X; minvar=.99, gamma=10.0 )
+function projectRBF( X; minvar=.99, gamma=10.0 )
   #=
   Radial Basis Function (Gaussian) kernel
 
@@ -312,7 +314,7 @@ function main()
      What to do with/about the fact that the data is highly autocorrelated?
      Does not seem to bother the fMRI people.
 
-     TODO: See if RBF PCA or other nonlinear methods afford better compression
+     TODO: See if nonlinear methods afford better compression
 
   TODO:
   Prepend a step to the pipeline to break the source up into manageable segments
@@ -325,8 +327,8 @@ function main()
   6. Project the entire space at once
   =#
 
-  path = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/"#"/Users/josh/Dropbox/Shirooni/Recordings/"
-  source = "lp"
+  path = "/Users/josh/Dropbox/Shirooni/Recordings/"
+  source = "170818_03"
 
   # TODO: For phenomenograms, though not for procedural composition,
   # we need higher resolution in the time domain, say 10fps. But that froze my MBA
@@ -336,9 +338,15 @@ function main()
   shingles, fs = extractShingles("$(path)$(source).wav", 4, 1/featureFps)
   X = constructFeatureSpace(shingles, fs)
 
-  # Project the feature space into principal component space
-  # and take a minimum-variance subspace
-  Xproj, projBasis = embedPCA(X; minvar=.5)
+  # Project into principal component space and take a minimum-variance subspace
+  Xpca, projBasis = projectPCA(X; minvar=.5)
+
+  # Project into an LLE subspace of dim 5
+  #lle = transform(LLE, X'; d=5)
+  #Xlle = projection(lle)'
+
+  Xproj = Xpca
+
   @show size(X)
   @show size(Xproj)
 
@@ -354,8 +362,8 @@ function main()
   2. Traverse the permutation, building a new array
   =#
   sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
-    # Sum of squares. TODO: This does not feel idiomatic, but I'm at a bit of a loss
-  perm = sortperm(sumsq) # FIXME: rev=true?
+    # Sum of squares. TODO: This does not feel idiomatic, but I'm at a loss
+  perm = sortperm(sumsq; rev=true)
   shinglesReordered = [ shingles[perm[i]] for i in 1:length(shingles) ]
 
   # Write the new composition
