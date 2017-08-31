@@ -2,7 +2,10 @@
 soundspace.jl: Pattern Spaces for Sound
 
 TODO Next steps:
-* Exclude SF from features
+* Envelograms!
+* Rename project/repo: Manifold?
+* Experiment with LTSA dimensionality and k-nn
+* Exclude SF from features or WEIGHT the MFCCs and SFs differently
 * Filters: Lowpass, Bandpass
 * Try t-SNE: TSne.jl req ≥ v0.6 https://distill.pub/2016/misread-tsne/
 
@@ -14,7 +17,7 @@ What:
 2. Project feature space into a lower-dim space suitable for visualization and learning
 3. Aug 2017: Sort segments in projected feature space and concatenate —
    a form of procedural composition using (ambient) recorded sound as input
-4. TODO: Render an animated PHENOMENOGRAM of projected feature space for the original source
+4. TODO: Animated envelograms
 
 Why:
 * Explore ways of heuristically representing phenomenologically significant
@@ -39,7 +42,7 @@ using StatsBase, Distances, ManifoldLearning
 using WAV, DSP, MFCC
   # N.b.: MFCC does not work with Julia v0.6 — error in rasta.jl
 
-#using GLVisualize, GLAbstraction, Reactive
+#using Contour, GeometryTypes, Colors, GLVisualize, GLAbstraction, Reactive
 
 
 function extractShingles( path; len=1, fps=10 )
@@ -265,7 +268,7 @@ function projectRBF( X; minvar=.99, gamma=10.0 )
   * Projection = XV (standardized X)
 
   TODO: Not yet working, or at least, I don't yet know how to interpret the result
-  I.e., I seem to get zero dimensionality reduction — conserved covariance requires
+  I seem to get zero dimensionality reduction — conserved covariance requires
   the entire transformed array, which is of Dim > Dim(X)
   =#
 
@@ -300,21 +303,17 @@ function main()
   4. Sort the shingles according to values in the projected feature space
   5. Concatenate the sorted shingles to produce a new composition highlighting variation
      (we hope) in perceptually significant features of the spectral envelope
-  6. TODO: Plot the projected features as a “phenomenogram” along the lines of
-     http://gr-framework.org/examples/audio_ex3.html
 
-     With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA embedding,
-     .99 variance gets us from 180 to 118 features,
-     .95 to 84
-     .90 to 64
-     .50 to  9
+  With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA projection,
+   .99 variance gets us from 180 to 118 features,
+   .95 to 84
+   .90 to 64
+   .50 to 11
 
-     So even for low-structure ambient-type sound, the feature space is highly informative
+  So even for low-structure ambient-type sound, the feature space is highly informative
 
-     What to do with/about the fact that the data is highly autocorrelated?
-     Does not seem to bother the fMRI people.
-
-     TODO: See if nonlinear methods afford better compression
+  What to do with/about the fact that the data is highly autocorrelated?
+  Does not seem to bother the fMRI people.
 
   TODO:
   Prepend a step to the pipeline to break the source up into manageable segments
@@ -329,7 +328,7 @@ function main()
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
   #path = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/"
-  source = "小学校/170830_01"
+  source = "小学校/170831_01"
 
   # Shingle the source and construct a feature space
   shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
@@ -350,6 +349,10 @@ function main()
   https://stackoverflow.com/questions/33741396/non-empty-collection-error-in-manifoldlearning-jl
 
   Diffusion Maps and LLE seem not to be working
+
+  LTSA has the advantage that after unrolling it attempts to reconstruct some
+  of the global structure (local tangent space _alignment_)
+  TODO: Experiment with LTSA k-nn and dim
 
   t-SNE is in a separate package, versionwise mutually incompatible with MFCC
   Plus t-SNE is nonconvex and highly sensitive to perplexity and terrible at eliciting
@@ -400,13 +403,68 @@ function main()
   conc = vcat(shinglesPermuted...)
   wavwrite(conc, "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
-  # TODO: Animated phenomenogram of projected features against time, with features on vertical
-  # Cf. http://gr-framework.org/examples/audio_ex3.html
-  #=anim = @animate for i in 1 : size(pca,1)
-    # plot( ... ) for one frame
-  end
-  gif(anim, "phenomenogram.gif"; fps=featureFramerate)
+  #=
+  Visualization
+
+  Initially I had in mind to do something like a spectrogram,
+  with dimensions in the projected feature space in lieu of fbands
+
+  But that'd be boring, and it would impose a false analogy on the relationship
+  between spectrum and feature space, let alone transformed feature space
+
+  These —
+  http://www.glvisualize.com/examples/lines/#contourlines
+  http://www.glvisualize.com/examples/surfaces/#surface
+  gave me a better idea
+
+  Dimensions come from transformed feature space: first three PDs or LTSA
+
+  These are, essentially, plots of the dynamic landscape (or a truncated part of it)
+  of the sound
+
+  TODO:
+  1. Static contour plot with time on x-axis
+    1. PCA, LTSA d=2
+    2. Normalize?
+    3. Really what we want is a series of 2D plots —
+       Does the contour plot obscure more than it shows?
+    4. Try SURFACES instead of contours
+    ...
+  2. As 1, but animated emphasis in time with music
+    1. Reactive for nonblocking rendering, so stays in time with music
+    ...
+  3. 3D state worm
+    1. PCA, LTSA d=3
+    2. Each frame is one shingle
+    3. Ghost trail of 29 frames behind current
+    4. Animated in time with music
   =#
+
+  x = 0:1/fps:size(X,1)/fps # x is time
+
+  cscale = map( v -> RGBA{Float32}(v, 1.0), colormap("Blues")) # TODO: Other colormaps?
+  mapcolor( v, mn, mx ) = cscale[floor(Int, ((v - mn) / (mx - mn)) * (length(cscale) - 1)) + 1]
+
+  y = view(Xpca,:,1) # y is first principal direction
+  z = view(Xpca,:,2) # z is second principal direction
+
+  zmin = minimum(z)
+  zmax = maximum(z)
+
+  window = glscreen("$(source) — PCA")
+
+  for h in zmin:0.2f0:zmax
+    c = contour(x, y, z, h)
+    for e in c.lines
+      points = map(e.vertices) do p
+        Point3f0(p, h)
+      end
+      render = visualize(points, :lines, color=mapcolor(h, zmin, zmax), model=rotation)
+      view(render, window, camera=:perspective)
+    end
+  end
+  renderloop(window) # FIXME: NEED TO DEFINE timesignal, rotation ??
+
 end
 
 main()
