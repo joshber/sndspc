@@ -2,17 +2,17 @@
 soundspace.jl: Pattern Spaces for Sound
 
 TODO Next steps:
-1. Filters: Lowpass, Bandpass
-2. Try LLE
-3. Try random recomposition
+* Exclude SF from features
+* Filters: Lowpass, Bandpass
+* Try t-SNE: TSne.jl req ≥ v0.6 https://distill.pub/2016/misread-tsne/
 
 Josh Berson, josh@joshberson.net
-May, August 2017
+May, August–September 2017
 
 What:
 1. Extract spectral envelope features from short segments (shingles) of an audio recording
 2. Project feature space into a lower-dim space suitable for visualization and learning
-3. Aug 2017: Sort segments in projected feature space and catenate —
+3. Aug 2017: Sort segments in projected feature space and concatenate —
    a form of procedural composition using (ambient) recorded sound as input
 4. TODO: Render an animated PHENOMENOGRAM of projected feature space for the original source
 
@@ -34,28 +34,28 @@ Inspirations:
 =#
 
 using StatsBase, Distances, ManifoldLearning
+#using TSne # Requires Julia ≥ v0.6
 
 using WAV, DSP, MFCC
-  # N.b.: MFCC does not work with Julia 0.6 — error in rasta.jl
+  # N.b.: MFCC does not work with Julia v0.6 — error in rasta.jl
 
 #using GLVisualize, GLAbstraction, Reactive
 
 
-function extractShingles( path, len = 3, step = len/2 )
+function extractShingles( path; len=1, fps=10 )
   #=
   Read an audio file, construct an array of shingles
   Returns shingles, sample rate
   =#
 
   source, fs = wavread(path)
-  # TODO: Filtering is causing segfaults in both Julia v.5 and .6
+  f = digitalfilter(Bandpass(300, 8000; fs=fs), Butterworth(2))
   #f = digitalfilter(Lowpass(8000; fs=fs), Butterworth(2))
-  #f = digitalfilter(Bandpass(200, 8000; fs=fs), Butterworth(2))
-  #filt!(source, f, source)
+  filt!(source, f, source)
 
   # Switch from seconds to frames
   len = Int64(floor(len * fs))
-  step = Int64(floor(step * fs))
+  step = Int64(floor(1/fps * fs))
 
   # Extract shingles of length len at intervals step
   # Array{Float64,2}: stereo sampling
@@ -67,7 +67,7 @@ function extractShingles( path, len = 3, step = len/2 )
     p += step
   end
 
-  shingles, fs
+  shingles, fs, len/fs, fps
 end
 
 function extractFeatures( shingle, fs, sfmin, sfmax )
@@ -328,27 +328,37 @@ function main()
   =#
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
-  source = "170818_03"
-
-  # TODO: For phenomenograms, though not for procedural composition,
-  # we need higher resolution in the time domain, say 10fps. But that froze my MBA
-  featureFps = 1 #10
+  #path = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/"
+  source = "小学校/170830_01"
 
   # Shingle the source and construct a feature space
-  shingles, fs = extractShingles("$(path)$(source).wav", 4, 1/featureFps)
+  shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
   X = constructFeatureSpace(shingles, fs)
 
+  #=
+  Projections
+  =#
+
   # Project into principal component space and take a minimum-variance subspace
-  Xpca, projBasis = projectPCA(X; minvar=.5)
-
-  # Project into an LLE subspace of dim 5
-  #lle = transform(LLE, X'; d=5)
-  #Xlle = projection(lle)'
-
-  Xproj = Xpca
-
+  Xpca, pcaBasis = projectPCA(X; minvar=.5)
   @show size(X)
-  @show size(Xproj)
+  @show size(Xpca) # How many principal directions needed to preserve 50 percent covariance?
+
+  #=
+  Nonlinear embedding. Achtung:
+  https://github.com/wildart/ManifoldLearning.jl/issues/6
+  https://stackoverflow.com/questions/33741396/non-empty-collection-error-in-manifoldlearning-jl
+
+  Diffusion Maps and LLE seem not to be working
+
+  t-SNE is in a separate package, versionwise mutually incompatible with MFCC
+  Plus t-SNE is nonconvex and highly sensitive to perplexity and terrible at eliciting
+  global structure — thought it would be nice for visualizing sound TYPES …
+  =#
+
+  # Project into an LTSA subspace of dim 5
+  ltsa = transform(LTSA, X'; d=5)
+  Xltsa = projection(ltsa)'
 
   #=
   Sort the shingles by projected feature-space values
@@ -356,19 +366,39 @@ function main()
   Doing this efficiently, i.e., O(n) time and O(1) space, is tricky:
   https://stackoverflow.com/questions/7365814/in-place-array-reordering
 
-  For simplicity, we'll just cons up a new array
+  For simplicity, we'll just cons up new arrays
 
   1. Get the permutation by sorting the projected-feature array
   2. Traverse the permutation, building a new array
+  3. Concatenate and write
+
+  Of course the elegant way to do this would be to store projections in an array
+  But with just a handful, cut and paste is hardly a great blow to the ego
   =#
+
+  # Permute the projection
+  Xproj = Xpca
+  projtype = "pca"
   sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
     # Sum of squares. TODO: This does not feel idiomatic, but I'm at a loss
   perm = sortperm(sumsq; rev=true)
-  shinglesReordered = [ shingles[perm[i]] for i in 1:length(shingles) ]
+  shinglesPermuted = [ shingles[perm[i]] for i in 1:length(shingles) ]
 
   # Write the new composition
-  conc = vcat(shinglesReordered...)
-  wavwrite(conc, "$(path)out/$(source) out.wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+  conc = vcat(shinglesPermuted...)
+  wavwrite(conc, "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+
+  # Permute the projection
+  Xproj = Xltsa
+  projtype = "ltsa"
+  sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
+    # Sum of squares. TODO: This does not feel idiomatic, but I'm at a loss
+  perm = sortperm(sumsq; rev=true)
+  shinglesPermuted = [ shingles[perm[i]] for i in 1:length(shingles) ]
+
+  # Write the new composition
+  conc = vcat(shinglesPermuted...)
+  wavwrite(conc, "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
   # TODO: Animated phenomenogram of projected features against time, with features on vertical
   # Cf. http://gr-framework.org/examples/audio_ex3.html
