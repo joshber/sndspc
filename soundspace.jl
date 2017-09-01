@@ -292,6 +292,50 @@ function projectRBF( X; minvar=.99, gamma=10.0 )
   V[:,1:k]
 end
 
+function envelogram( X, fps )
+  #=
+  envelogram
+
+  Draw something like a spectrogram but for projected feature dimensions
+  Here X is an (n,d) array of intensities in projected space (e.g., PCA, LTSA)
+
+  Inspiration: http://www.glvisualize.com/examples/imagelike/#contourf
+
+  TODO: COLOR MAP?
+  TODO: PCA and LTSA versions side by side, a single plot with a blank column between -- but scaled differently
+  =#
+
+  mn = minimum(X)
+  mx = maximum(X)
+
+  # Translate and scale, add three seconds of silence
+  scaled = [ (i - mn) / (mx - mn) for i in X ]
+  scaled = vcat(scaled, zeros(Float64, 3 * fps, size(scaled,2)))
+
+  barw = 10 # bar width in px
+  envelog = zeros(Intensity{1,Float32}, size(scaled,1), barw * size(scaled,2))
+  visible = zeros(Intensity{1,Float32}, 60 * fps, size(envelogram,2))
+
+  for i in 1 : size(scaled,2)
+    envelog[:, barw * (i - 1) + 1 : barw * i] = Intensity{1,Float32}(scaled[:,i])
+  end
+
+  # Nested functions entail a performance hit, but it's just used for one mapping
+  # We need the scope capture
+  function timeslice( t )
+    lowb = max(1, t - 60 * fps + 1) # FIXME: CHECK — off by one?
+    visible[lowb:t] = envelog[lowb:t]
+  end
+
+  window = glscreen("$(source)")
+  timesignal = loop(linspace(0f0, 1f0, size(envelog,1)), fps)
+
+  renderable = visualize(map(timeslice, timesignal))
+  view(renderable, window, camera=:orthographic_pixel)
+
+  renderloop(window)
+end
+
 function main()
   #=
   Pattern space pipeline
@@ -401,70 +445,13 @@ function main()
 
   # Write the new composition
   conc = vcat(shinglesPermuted...)
-  wavwrite(conc, "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+  d = outdim(Xproj)
+  knn = neighbors(Xproj)
+  wavwrite( conc,
+            "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype) dim=$(d) knn=($knn).wav";
+            Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
-  #=
-  Visualization
-
-  Initially I had in mind to do something like a spectrogram,
-  with dimensions in the projected feature space in lieu of fbands
-
-  But that'd be boring, and it would impose a false analogy on the relationship
-  between spectrum and feature space, let alone transformed feature space
-
-  These —
-  http://www.glvisualize.com/examples/lines/#contourlines
-  http://www.glvisualize.com/examples/surfaces/#surface
-  gave me a better idea
-
-  Dimensions come from transformed feature space: first three PDs or LTSA
-
-  These are, essentially, plots of the dynamic landscape (or a truncated part of it)
-  of the sound
-
-  TODO:
-  1. Static contour plot with time on x-axis
-    1. PCA, LTSA d=2
-    2. Normalize?
-    3. Really what we want is a series of 2D plots —
-       Does the contour plot obscure more than it shows?
-    4. Try SURFACES instead of contours
-    ...
-  2. As 1, but animated emphasis in time with music
-    1. Reactive for nonblocking rendering, so stays in time with music
-    ...
-  3. 3D state worm
-    1. PCA, LTSA d=3
-    2. Each frame is one shingle
-    3. Ghost trail of 29 frames behind current
-    4. Animated in time with music
-  =#
-
-  x = 0:1/fps:size(X,1)/fps # x is time
-
-  cscale = map( v -> RGBA{Float32}(v, 1.0), colormap("Blues")) # TODO: Other colormaps?
-  mapcolor( v, mn, mx ) = cscale[floor(Int, ((v - mn) / (mx - mn)) * (length(cscale) - 1)) + 1]
-
-  y = view(Xpca,:,1) # y is first principal direction
-  z = view(Xpca,:,2) # z is second principal direction
-
-  zmin = minimum(z)
-  zmax = maximum(z)
-
-  window = glscreen("$(source) — PCA")
-
-  for h in zmin:0.2f0:zmax
-    c = contour(x, y, z, h)
-    for e in c.lines
-      points = map(e.vertices) do p
-        Point3f0(p, h)
-      end
-      render = visualize(points, :lines, color=mapcolor(h, zmin, zmax), model=rotation)
-      view(render, window, camera=:perspective)
-    end
-  end
-  renderloop(window) # FIXME: NEED TO DEFINE timesignal, rotation ??
-
+  envelogram(Xpca, fps)
 end
 
 main()
