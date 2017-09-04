@@ -282,7 +282,7 @@ function projectPCA( X; minvar=.99 )
   end
   =#
 
-  Xs * V[:,1:k], V[:,1:k]
+  Xs * V[:,1:k], S[1:k] #V[:,1:k]
 end
 
 function projectRBF( X; minvar=.99, gamma=10.0 )
@@ -365,7 +365,7 @@ function main()
   =#
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
-  source = "小学校/170902_01"
+  source = "小学校/170830_01"
 
   # Shingle the source and construct a feature space
   shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
@@ -376,7 +376,7 @@ function main()
   =#
 
   # Project into principal component space and take a minimum-variance subspace
-  Xpca, pcaBasis = projectPCA(X; minvar=.5)
+  Xpca, pcavar = projectPCA(X; minvar=.5)
   @show size(X)
   @show size(Xpca) # How many principal directions needed to preserve 50 percent covariance?
 
@@ -396,7 +396,7 @@ function main()
   global structure — thought it would be nice for visualizing sound TYPES …
   =#
 
-  # Project into an LTSA subspace of dim 5
+  #= Project into an LTSA subspace of dim 5
   # I've tried d=k=size(Xpca,2). The intuition is that LTSA uses PCA to find local
   # linear manifolds, so this allows us to preserve the same degree of variance
   # as above for PCA. k-nn must be ≥ outdim
@@ -404,6 +404,7 @@ function main()
   # See notes in header on Dupont and Ravel's results. They use t-SNE with knn=5, d=5
   ltsa = transform(LTSA, X'; d=5)
   Xltsa = projection(ltsa)'
+  =#
 
   # Serialize the feature space and its projections for later use, e.g. in visualization
   h5open("$(path)out/$(source).h5", "w") do f
@@ -411,7 +412,7 @@ function main()
     write(f, "fps", fps)
     write(f, "X", X)
     write(f, "pca", Xpca)
-    write(f, "ltsa", Xltsa)
+    #write(f, "ltsa", Xltsa)
   end
 
   #=
@@ -428,21 +429,22 @@ function main()
 
   Of course the elegant way to do this would be to store projections in an array
   But with just a handful, cut and paste is hardly a great blow to the ego
-  = #
+  =#
 
   # Permute the projection
-  Xproj = Xpca
+  Xproj = Xpca# [:,1:5] # Take just the first 5 principal directions
   projtype = "pca"
-  sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
+  sumbyvar = [ dot(shingle, pcavar) for shingle in [ view(Xproj,r,:) for r in 1:size(Xproj,1) ] ]
+  #sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
     # Sum of squares. TODO: This does not feel idiomatic, but I'm at a loss
-  perm = sortperm(sumsq; rev=true)
+  perm = sortperm(sumbyvar; rev=true)
   shinglesPermuted = [ shingles[perm[i]] for i in 1:length(shingles) ]
 
   # Write the new composition
   conc = vcat(shinglesPermuted...)
-  wavwrite(conc, "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+  wavwrite(conc, "$(path)out/$(source) $(len)s $(fps)fps $(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
-  # Permute the projection
+  #= Permute the projection
   Xproj = Xltsa
   projtype = "ltsa"
   sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
@@ -455,8 +457,9 @@ function main()
   d = outdim(ltsa)
   knn = neighbors(ltsa)
   wavwrite( conc,
-            "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype) k=$(knn) d=$(d).wav";
+            "$(path)out/$(source) $(len)s $(fps)fps $(projtype) k=$(knn) d=$(d).wav";
             Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
-=#end
+  =#
+end
 
 main()
