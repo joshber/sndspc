@@ -1,13 +1,49 @@
 #=
 soundspace.jl: Pattern Spaces for Sound
 
-TODO Next steps:
-* Envelograms!
-* Rename project/repo: Manifold?
-* Experiment with LTSA dimensionality and k-nn
-* Exclude SF from features or WEIGHT the MFCCs and SFs differently
-* Filters: Lowpass, Bandpass
-* Try t-SNE: TSne.jl req ≥ v0.6 https://distill.pub/2016/misread-tsne/
+Parameters to experiment with:
+* Bandpass/Lowpass passband
+* Manifold learning algorithms (e.g., t-SNE in addition to linear PCA and LTSA)
+  https://distill.pub/2016/misread-tsne/
+  But note what Van der Maaten et al. (2009) have to say:
+  https://lvdmaaten.github.io/publications/papers/TR_Dimensionality_Reduction_Review_2009.pdf)
+    the spectral techniques Kernel PCA, Isomap, LLE, and Laplacian Eigenmaps can
+    all be viewed upon as special cases of the more general problem of learning
+    eigenfunctions [14, 57]. As a result, Isomap, LLE, and Laplacian Eigenmaps
+    can be considered as special cases of Kernel PCA that use a specific kernel
+    function κ.
+    …
+    Globally, the difference between the results of the experiments on the artificial
+    and the natural datasets is significant: **techniques that perform well on
+    artificial datasets perform poorly on natural datasets, and vice versa.**
+    …
+    We observed that most nonlinear techniques do not outperform PCA on natural
+    datasets, despite their ability to learn the structure of complex nonlinear
+    manifolds.
+
+    The upshot is that artificial data sets tend to have low intrinsic dimensionality
+    even when they have high manifest dimensionality, e.g. Swiss Roll. Real datasets
+    tend to have much higher intrinsic dimensionality, which foils kernel and sparse
+    spectral techniques. Plus they overfit.
+* Manifold learning parameters (e.g., for PCA, conserved variance, for LTSA, k-nn and outdim)
+  Higher k-nn should learn more global structure at the expense of local structure
+  I.e., tradeoff between higher variance (lower k-nn) and higher bias (higher k-nn)
+  Higher outdim (conserved covariance in local manifolds) may likewise yield higher variance
+  (more overfitting) — but also a more pronounced spectral/timbral gradient in the
+  resulting composition
+  Dupont and Ravel found the single best classification (for highly-structured
+  instrumental sounds) came from a t-SNE of dim 5 on the high-dim feature set,
+  i.e., no PCA preprocessing
+* Algorithm for sorting shingles based on manifold features
+  Sum of squares makes sense — it's an L2-norm scalarization — but maybe there are others?
+  E.g., simple sum, i.e., L1 scalarization, or maximum()
+  Dupont and Ravel take the maximum in an ensemble of t-SNE(dim ϵ [1,5])
+* Shingle length and step
+  Shingles of 500ms at 100ms epoch seem to produce pleasing and interesting results
+  At 250ms, auditory objects lose recognizability
+  Shingles of 2–4s produce disturbing results — seems to alias a rhythm of expectation
+  in how we apprehend auditory objects, so that the cuts are too frustrating (too
+  much tension, not enough resolution) and create a driving rhythm of their own
 
 Josh Berson, josh@joshberson.net
 May, August–September 2017
@@ -39,10 +75,12 @@ Inspirations:
 using StatsBase, Distances, ManifoldLearning
 #using TSne # Requires Julia ≥ v0.6
 
+using HDF5
+
 using WAV, DSP, MFCC
   # N.b.: MFCC does not work with Julia v0.6 — error in rasta.jl
 
-#using Contour, GeometryTypes, Colors, GLVisualize, GLAbstraction, Reactive
+using GLVisualize, GeometryTypes, Colors#, GLAbstraction, Colors, Reactive
 
 
 function extractShingles( path; len=1, fps=10 )
@@ -292,50 +330,6 @@ function projectRBF( X; minvar=.99, gamma=10.0 )
   V[:,1:k]
 end
 
-function envelogram( X, fps )
-  #=
-  envelogram
-
-  Draw something like a spectrogram but for projected feature dimensions
-  Here X is an (n,d) array of intensities in projected space (e.g., PCA, LTSA)
-
-  Inspiration: http://www.glvisualize.com/examples/imagelike/#contourf
-
-  TODO: COLOR MAP?
-  TODO: PCA and LTSA versions side by side, a single plot with a blank column between -- but scaled differently
-  =#
-
-  mn = minimum(X)
-  mx = maximum(X)
-
-  # Translate and scale, add three seconds of silence
-  scaled = [ (i - mn) / (mx - mn) for i in X ]
-  scaled = vcat(scaled, zeros(Float64, 3 * fps, size(scaled,2)))
-
-  barw = 10 # bar width in px
-  envelog = zeros(Intensity{1,Float32}, size(scaled,1), barw * size(scaled,2))
-  visible = zeros(Intensity{1,Float32}, 60 * fps, size(envelogram,2))
-
-  for i in 1 : size(scaled,2)
-    envelog[:, barw * (i - 1) + 1 : barw * i] = Intensity{1,Float32}(scaled[:,i])
-  end
-
-  # Nested functions entail a performance hit, but it's just used for one mapping
-  # We need the scope capture
-  function timeslice( t )
-    lowb = max(1, t - 60 * fps + 1) # FIXME: CHECK — off by one?
-    visible[lowb:t] = envelog[lowb:t]
-  end
-
-  window = glscreen("$(source)")
-  timesignal = loop(linspace(0f0, 1f0, size(envelog,1)), fps)
-
-  renderable = visualize(map(timeslice, timesignal))
-  view(renderable, window, camera=:orthographic_pixel)
-
-  renderloop(window)
-end
-
 function main()
   #=
   Pattern space pipeline
@@ -371,8 +365,7 @@ function main()
   =#
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
-  #path = "/Users/josh/Dropbox/Recordings/LaosFebMar2016/"
-  source = "小学校/170831_01"
+  source = "小学校/170902_01"
 
   # Shingle the source and construct a feature space
   shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
@@ -404,11 +397,25 @@ function main()
   =#
 
   # Project into an LTSA subspace of dim 5
+  # I've tried d=k=size(Xpca,2). The intuition is that LTSA uses PCA to find local
+  # linear manifolds, so this allows us to preserve the same degree of variance
+  # as above for PCA. k-nn must be ≥ outdim
+  # But the results are not as interesting
+  # See notes in header on Dupont and Ravel's results. They use t-SNE with knn=5, d=5
   ltsa = transform(LTSA, X'; d=5)
   Xltsa = projection(ltsa)'
 
+  # Serialize the feature space and its projections for later use, e.g. in visualization
+  h5open("$(path)out/$(source).h5", "w") do f
+    write(f, "len", len)
+    write(f, "fps", fps)
+    write(f, "X", X)
+    write(f, "pca", Xpca)
+    write(f, "ltsa", Xltsa)
+  end
+
   #=
-  Sort the shingles by projected feature-space values
+  Permute the shingles by projected feature-space values
 
   Doing this efficiently, i.e., O(n) time and O(1) space, is tricky:
   https://stackoverflow.com/questions/7365814/in-place-array-reordering
@@ -421,7 +428,7 @@ function main()
 
   Of course the elegant way to do this would be to store projections in an array
   But with just a handful, cut and paste is hardly a great blow to the ego
-  =#
+  = #
 
   # Permute the projection
   Xproj = Xpca
@@ -445,13 +452,11 @@ function main()
 
   # Write the new composition
   conc = vcat(shinglesPermuted...)
-  d = outdim(Xproj)
-  knn = neighbors(Xproj)
+  d = outdim(ltsa)
+  knn = neighbors(ltsa)
   wavwrite( conc,
-            "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype) dim=$(d) knn=($knn).wav";
+            "$(path)out/$(source) out $(len)s $(fps)fps proj=$(projtype) k=$(knn) d=$(d).wav";
             Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
-
-  envelogram(Xpca, fps)
-end
+=#end
 
 main()
