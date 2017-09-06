@@ -1,50 +1,6 @@
 #=
 soundspace.jl: Pattern Spaces for Sound
 
-Parameters to experiment with:
-* Bandpass/Lowpass passband
-* Manifold learning algorithms (e.g., t-SNE in addition to linear PCA and LTSA)
-  https://distill.pub/2016/misread-tsne/
-  But note what Van der Maaten et al. (2009) have to say:
-  https://lvdmaaten.github.io/publications/papers/TR_Dimensionality_Reduction_Review_2009.pdf)
-    the spectral techniques Kernel PCA, Isomap, LLE, and Laplacian Eigenmaps can
-    all be viewed upon as special cases of the more general problem of learning
-    eigenfunctions [14, 57]. As a result, Isomap, LLE, and Laplacian Eigenmaps
-    can be considered as special cases of Kernel PCA that use a specific kernel
-    function κ.
-    …
-    Globally, the difference between the results of the experiments on the artificial
-    and the natural datasets is significant: **techniques that perform well on
-    artificial datasets perform poorly on natural datasets, and vice versa.**
-    …
-    We observed that most nonlinear techniques do not outperform PCA on natural
-    datasets, despite their ability to learn the structure of complex nonlinear
-    manifolds.
-
-    The upshot is that artificial data sets tend to have low intrinsic dimensionality
-    even when they have high manifest dimensionality, e.g. Swiss Roll. Real datasets
-    tend to have much higher intrinsic dimensionality, which foils kernel and sparse
-    spectral techniques. Plus they overfit.
-* Manifold learning parameters (e.g., for PCA, conserved variance, for LTSA, k-nn and outdim)
-  Higher k-nn should learn more global structure at the expense of local structure
-  I.e., tradeoff between higher variance (lower k-nn) and higher bias (higher k-nn)
-  Higher outdim (conserved covariance in local manifolds) may likewise yield higher variance
-  (more overfitting) — but also a more pronounced spectral/timbral gradient in the
-  resulting composition
-  Dupont and Ravel found the single best classification (for highly-structured
-  instrumental sounds) came from a t-SNE of dim 5 on the high-dim feature set,
-  i.e., no PCA preprocessing
-* Algorithm for sorting shingles based on manifold features
-  Sum of squares makes sense — it's an L2-norm scalarization — but maybe there are others?
-  E.g., simple sum, i.e., L1 scalarization, or maximum()
-  Dupont and Ravel take the maximum in an ensemble of t-SNE(dim ϵ [1,5])
-* Shingle length and step
-  Shingles of 500ms at 100ms epoch seem to produce pleasing and interesting results
-  At 250ms, auditory objects lose recognizability
-  Shingles of 2–4s produce disturbing results — seems to alias a rhythm of expectation
-  in how we apprehend auditory objects, so that the cuts are too frustrating (too
-  much tension, not enough resolution) and create a driving rhythm of their own
-
 Josh Berson, josh@joshberson.net
 May, August–September 2017
 
@@ -70,6 +26,54 @@ Inspirations:
   http://www.impulsivehabitat.com/releases/ihab040.htm
   (An album of ambient insect noise)
 * See also Berson, “Sound and Pain” https://goo.gl/Qn2HTI
+
+Parameters to experiment with:
+* Bandpass/Lowpass passband
+* Weighting of features (e.g., MFCC features vs SF features)
+* Manifold learning algorithms (e.g., t-SNE in addition to linear PCA and LTSA)
+  https://distill.pub/2016/misread-tsne/
+  But note what Van der Maaten et al. (2009) have to say:
+  https://lvdmaaten.github.io/publications/papers/TR_Dimensionality_Reduction_Review_2009.pdf)
+    the spectral techniques Kernel PCA, Isomap, LLE, and Laplacian Eigenmaps can
+    all be viewed upon as special cases of the more general problem of learning
+    eigenfunctions [14, 57]. As a result, Isomap, LLE, and Laplacian Eigenmaps
+    can be considered as special cases of Kernel PCA that use a specific kernel
+    function κ.
+    …
+    Globally, the difference between the results of the experiments on the artificial
+    and the natural datasets is significant: **techniques that perform well on
+    artificial datasets perform poorly on natural datasets, and vice versa.**
+    …
+    We observed that most nonlinear techniques do not outperform PCA on natural
+    datasets, despite their ability to learn the structure of complex nonlinear
+    manifolds.
+
+    The upshot is that artificial data sets tend to have low intrinsic dimensionality
+    even when they have high manifest dimensionality, e.g. Swiss Roll. Real datasets
+    tend to have much higher intrinsic dimensionality, which foils kernel and sparse
+    spectral techniques. Plus they overfit.
+
+* Manifold learning parameters (e.g., for PCA, conserved variance, for LTSA, k-nn and outdim)
+  Higher k-nn should learn more global structure at the expense of local structure
+  I.e., tradeoff between higher variance (lower k-nn) and higher bias (higher k-nn)
+  Higher outdim (conserved covariance in local manifolds) may likewise yield higher variance
+  (more overfitting) — but also a more pronounced spectral/timbral gradient in the
+  resulting composition
+  Dupont and Ravel found the single best classification (for highly-structured
+  instrumental sounds) came from a t-SNE of dim 5 on the high-dim feature set,
+  i.e., no PCA preprocessing
+* Algorithm for sorting shingles based on manifold features
+  For PCA, dot product with eigenvalue (preserved variance) vector makes sense
+  For sparse spectral methods, sum of squares seems to make sense —
+  it's an L2-norm scalarization — but maybe there are others?
+  E.g., simple sum, i.e., L1 scalarization, or maximum()
+  Dupont and Ravel take the maximum in an ensemble of t-SNE(dim ϵ [1,5])
+* Shingle length and step
+  Shingles of 500ms at 100ms epoch seem to produce pleasing and interesting results
+  At 250ms, auditory objects lose recognizability
+  Shingles of 2–4s produce disturbing results — seems to alias a rhythm of expectation
+  in how we apprehend auditory objects, so that the cuts are too frustrating (too
+  much tension, not enough resolution) and create a driving rhythm of their own
 =#
 
 using StatsBase, Distances, ManifoldLearning
@@ -243,8 +247,7 @@ function projectPCA( X; minvar=.99 )
   Returns:
   * A projection of standardized X onto the first k principal directions,
     where those k directions account for at least minvar fraction of the total variance
-  * The first k principal directions as a matrix, with PDs in columns
-    (projection basis)
+  * Eigenvalue vector (variance per principal direction)
 
   Principal component analysis is one of those things that makes less sense
   the more you think about it. Confusion abounds: Samples in rows or in columns,
@@ -365,11 +368,15 @@ function main()
   =#
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
-  source = "小学校/170830_01"
+  source = "小学校/170902_01"
 
   # Shingle the source and construct a feature space
   shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
   X = constructFeatureSpace(shingles, fs)
+
+  # Weight the features
+  mfccToSF = 1
+  X[1:156] .*= mfccToSF
 
   #=
   Projections
@@ -396,7 +403,7 @@ function main()
   global structure — thought it would be nice for visualizing sound TYPES …
   =#
 
-  #= Project into an LTSA subspace of dim 5
+  # Project into an LTSA subspace of dim 5
   # I've tried d=k=size(Xpca,2). The intuition is that LTSA uses PCA to find local
   # linear manifolds, so this allows us to preserve the same degree of variance
   # as above for PCA. k-nn must be ≥ outdim
@@ -404,15 +411,21 @@ function main()
   # See notes in header on Dupont and Ravel's results. They use t-SNE with knn=5, d=5
   ltsa = transform(LTSA, X'; d=5)
   Xltsa = projection(ltsa)'
-  =#
+  #
 
   # Serialize the feature space and its projections for later use, e.g. in visualization
   h5open("$(path)out/$(source).h5", "w") do f
+    #=@write f len
+    @write f fps
+    @write f mfccToSF
+    @write f X
+    =#
     write(f, "len", len)
     write(f, "fps", fps)
+    write(f, "mfccToSF", mfccToSF)
     write(f, "X", X)
     write(f, "pca", Xpca)
-    #write(f, "ltsa", Xltsa)
+    write(f, "ltsa", Xltsa)
   end
 
   #=
@@ -435,16 +448,15 @@ function main()
   Xproj = Xpca# [:,1:5] # Take just the first 5 principal directions
   projtype = "pca"
   sumbyvar = [ dot(shingle, pcavar) for shingle in [ view(Xproj,r,:) for r in 1:size(Xproj,1) ] ]
-  #sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
-    # Sum of squares. TODO: This does not feel idiomatic, but I'm at a loss
   perm = sortperm(sumbyvar; rev=true)
   shinglesPermuted = [ shingles[perm[i]] for i in 1:length(shingles) ]
 
   # Write the new composition
   conc = vcat(shinglesPermuted...)
-  wavwrite(conc, "$(path)out/$(source) $(len)s $(fps)fps $(projtype).wav"; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
+  fn = "$(path)out/$(source) $(len)s $(fps)fps mfcc-to-sf=$(mfccToSF) $(projtype).wav"
+  wavwrite(conc, fn; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 
-  #= Permute the projection
+  # Permute the projection
   Xproj = Xltsa
   projtype = "ltsa"
   sumsq = [ sum(i.^2) for i in [ Xproj[j,:] for j in 1:size(Xproj,1) ] ]
@@ -456,10 +468,8 @@ function main()
   conc = vcat(shinglesPermuted...)
   d = outdim(ltsa)
   knn = neighbors(ltsa)
-  wavwrite( conc,
-            "$(path)out/$(source) $(len)s $(fps)fps $(projtype) k=$(knn) d=$(d).wav";
-            Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
-  =#
+  fn = "$(path)out/$(source) $(len)s $(fps)fps mfcc-to-sf=$(mfccToSF) $(projtype) k=$(knn) d=$(d).wav"
+  wavwrite(conc, fn; Fs=fs, nbits=24, compression=WAVE_FORMAT_PCM)
 end
 
 main()
