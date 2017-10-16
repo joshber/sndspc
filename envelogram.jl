@@ -24,8 +24,8 @@ function envelogram( source, X, Y, fps )
   # Combine the two projections for visualization
   scaled = hcat(Xscaled, zeros(Float32, size(X,1), 1), Yscaled)
 
-  barw = 10 # bar width in px
-  gapw = 5
+  barw = 2 #10 # bar width in px
+  gapw = 2
   framelen = 30 * fps # 30s visible frame
 
   # We could use Simplex or HyperRectangles as well as columns of intensities
@@ -66,12 +66,11 @@ function heat( source, X, fps )
 
   plotlyjs()
 
-  mn = minimum(X)
+  #=mn = minimum(X)
   mx = maximum(X)
   X = [ Float32((i - mn) / (mx - mn)) for i in X ]
+  =#
 
-
-  # TODO: TRY HEATMAP -- x = 1:size(X,1), y = 1:size(X,2), z=X' ???
   #plot(X; t=:line, layout=(size(X,2), 1), axis=:none, key=false, ticks=nothing, border=false)
   heatmap(1:size(X,1), 1:size(X,2), X')
   gui()
@@ -92,6 +91,6 @@ X = data["X"]
 P1 = data["pca"]
 P2 = data["ltsa"]
 
-heat("$(source)", P1, fps)
-#heat("$(source)", P1, fps)
-#envelogram("$(source)", P1, P2, fps)
+heat("$(source)", X, fps)
+
+#envelogram("$(source)", X, P1, fps)

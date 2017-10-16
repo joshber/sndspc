@@ -10,6 +10,7 @@ What:
 3. Aug 2017: Sort segments in projected feature space and concatenate —
    a form of procedural composition using (ambient) recorded sound as input
 4. TODO: Animated envelograms
+5. TODO (Mark IJzerman, 25 September 2017): Window shingles
 
 Why:
 * Explore ways of heuristically representing phenomenologically significant
@@ -345,7 +346,7 @@ function main()
   5. Concatenate the sorted shingles to produce a new composition highlighting variation
      (we hope) in perceptually significant features of the spectral envelope
 
-  With Inshriach.wav as training data, shingles of 1s/5 fps, and linear PCA projection,
+  With Inshriach.wav as training data, shingles of 1s/5fps, and linear PCA projection,
    .99 variance gets us from 180 to 118 features,
    .95 to 84
    .90 to 64
@@ -368,10 +369,10 @@ function main()
   =#
 
   path = "/Users/josh/Dropbox/Shirooni/Recordings/"
-  source = "小学校/170902_01"
+  source = "170902_01"
 
   # Shingle the source and construct a feature space
-  shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=10)
+  shingles, fs, len, fps = extractShingles("$(path)$(source).wav"; len=.5, fps=4)
   X = constructFeatureSpace(shingles, fs)
 
   # Weight the features
